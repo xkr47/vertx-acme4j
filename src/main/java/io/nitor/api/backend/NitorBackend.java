@@ -1,5 +1,5 @@
 /**
- * Copyright 2016-2017 Nitor Creations Oy
+ * Copyright 2016-2017 Nitor Creations Oy, Jonas Berlin
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -85,7 +85,7 @@ public class NitorBackend extends AbstractVerticle
            logger.error("Fallback exception handler got", e);
         });
 
-        HttpServerOptions httpServerOptions = SetupHttpServerOptions.createHttpServerOptions(config());
+        HttpServerOptions httpServerOptions = SetupHttpServerOptions.createHttpServerOptions(vertx, config());
 
         Router router = Router.router(vertx);
 
