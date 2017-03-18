@@ -108,10 +108,10 @@ public class NitorBackend extends AbstractVerticle
             }
             routingContext.response().setChunked(true).write(resp).end();
         });
-
+/*
         LetsEncrypt letsEncrypt = new LetsEncrypt();
         router.get("/.well-known").handler(routingContext -> letsEncrypt.handle(routingContext.request()));
-
+*/
         JsonObject clientAuth = config().getJsonObject("clientAuth");
         if (clientAuth != null) {
             if (null != clientAuth.getString("clientChain")) {
