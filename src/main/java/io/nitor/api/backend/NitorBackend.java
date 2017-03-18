@@ -160,12 +160,14 @@ public class NitorBackend extends AbstractVerticle
         if (staticConf != null) {
             staticConf.forEach(c -> {
                 JsonObject conf = (JsonObject) c;
+                int cacheTimeout = conf.getInteger("cacheTimeout", (int) MINUTES.toSeconds(30));
                 router.route(conf.getString("path")).handler(
                         StaticHandler.create()
                                 .setFilesReadOnly(conf.getBoolean("readOnly", true))
                                 .setAllowRootFileSystemAccess(true)
                                 .setWebRoot(conf.getString("dir", "."))
-                                .setCacheEntryTimeout(conf.getInteger("cacheTimeout", (int) MINUTES.toSeconds(30)))
+                                .setCachingEnabled(cacheTimeout > 0)
+                                .setCacheEntryTimeout(cacheTimeout)
                 );
             });
         }

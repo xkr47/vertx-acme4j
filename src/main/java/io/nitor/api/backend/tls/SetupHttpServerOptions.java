@@ -65,68 +65,79 @@ public class SetupHttpServerOptions {
                 .setCompressionSupported(false) // otherwise it automatically compresses based on response headers even if pre-compressed with e.g. proxy
                 .setUsePooledBuffers(true)
                 // TODO: upcoming in vertx 3.4+ .setCompressionLevel(2)
-                .setIdleTimeout(config.getInteger("idleTimeout", (int) MINUTES.toSeconds(10)))
-                .setSsl(true)
-                .setKeyCertOptions(dynamicCertOptions)
-                // TLS tuning
-                .addEnabledSecureTransportProtocol("TLSv1.2")
-                .addEnabledSecureTransportProtocol("TLSv1.3");
-
-        // server side certificates
-        DynamicCertManager.init(vertx, dynamicCertOptions, "default");
-
-        class State {
-            PrivateKey key;
-            Certificate[] chain;
-            void keyBuffer(AsyncResult<Buffer> keyBuffer) {
-                vertx.executeBlocking((Future<PrivateKey> fut) -> {
-                    fut.complete(PemLoader.loadPrivateKey(keyBuffer.result()));
-                }, evt -> {
-                    key = evt.result();
-                    check();
-                });
-            }
-            void certBuffer(AsyncResult<Buffer> certBuffer) {
-                vertx.executeBlocking((Future<Certificate[]> fut) -> {
-                    fut.complete(PemLoader.loadCerts(certBuffer.result()));
-                }, evt -> {
-                    chain = evt.result();
-                    check();
-                });
-            }
-            void check() {
-                if (key != null && chain != null) {
-                    DynamicCertManager.put("default", key, chain);
-                }
-            }
-        }
-
-        final State state = new State();
-        vertx.fileSystem().readFile(tls.getString("serverKey"), state::keyBuffer);
-        vertx.fileSystem().readFile(tls.getString("serverCert"), state::certBuffer);
+                .setIdleTimeout(config.getInteger("idleTimeout", (int) MINUTES.toSeconds(10)));
 
         if (!config.getBoolean("http2", true)) {
             httpOptions.setAlpnVersions(asList(HTTP_1_1));
         }
-        JsonObject clientAuth = config.getJsonObject("clientAuth");
-        if (clientAuth != null && clientAuth.getString("clientChain") != null) {
-            // client side certificate
+
+        if (tls != null) {
+            httpOptions
+                    .setSsl(true)
+                    .setKeyCertOptions(dynamicCertOptions)
+                    // TLS tuning
+                    .addEnabledSecureTransportProtocol("TLSv1.2")
+                    .addEnabledSecureTransportProtocol("TLSv1.3");
+
+            // server side certificates
+            DynamicCertManager.init(vertx, dynamicCertOptions, "default");
+
+            class State {
+                PrivateKey key;
+                Certificate[] chain;
+
+                void keyBuffer(AsyncResult<Buffer> keyBuffer) {
+                    vertx.executeBlocking((Future<PrivateKey> fut) -> {
+                        fut.complete(PemLoader.loadPrivateKey(keyBuffer.result()));
+                    }, evt -> {
+                        key = evt.result();
+                        check();
+                    });
+                }
+
+                void certBuffer(AsyncResult<Buffer> certBuffer) {
+                    vertx.executeBlocking((Future<Certificate[]> fut) -> {
+                        fut.complete(PemLoader.loadCerts(certBuffer.result()));
+                    }, evt -> {
+                        chain = evt.result();
+                        check();
+                    });
+                }
+
+                void check() {
+                    if (key != null && chain != null) {
+                        DynamicCertManager.put("default", key, chain);
+                    }
+                }
+            }
+
+            final State state = new State();
+            vertx.fileSystem().readFile(tls.getString("serverKey"), state::keyBuffer);
+            vertx.fileSystem().readFile(tls.getString("serverCert"), state::certBuffer);
+
+            if (!config.getBoolean("http2", true)) {
+                httpOptions.setAlpnVersions(asList(HTTP_1_1));
+            }
+            JsonObject clientAuth = config.getJsonObject("clientAuth");
+            if (httpOptions.isSsl() && clientAuth != null && clientAuth.getString("clientChain") != null) {
+                // client side certificate
                 httpOptions.setClientAuth(REQUEST)
-                    .setTrustOptions(new PemTrustOptions()
-                            .addCertPath(clientAuth.getString("clientChain"))
-                    );
-        }
-        if (config.getBoolean("useNativeOpenSsl")) {
-            httpOptions
-                    .setUseAlpn(true)
-                    .setSslEngineOptions(new OpenSSLEngineOptions());
-            cipherSuites.stream().map(SetupHttpServerOptions::javaCipherNameToOpenSSLName)
-                    .forEach(httpOptions::addEnabledCipherSuite);
-        } else {
-            httpOptions
-                    .setUseAlpn(DynamicAgent.enableJettyAlpn())
-                    .setJdkSslEngineOptions(new JdkSSLEngineOptions());
-            cipherSuites.forEach(httpOptions::addEnabledCipherSuite);
+                        .setTrustOptions(new PemTrustOptions()
+                                .addCertPath(clientAuth.getString("clientChain"))
+                        );
+            }
+            if (config.getBoolean("useNativeOpenSsl")) {
+                httpOptions
+                        .setUseAlpn(true)
+                        .setSslEngineOptions(new OpenSSLEngineOptions());
+                cipherSuites.stream().map(SetupHttpServerOptions::javaCipherNameToOpenSSLName)
+                        .forEach(httpOptions::addEnabledCipherSuite);
+            } else {
+                httpOptions
+                        .setUseAlpn(DynamicAgent.enableJettyAlpn())
+                        .setJdkSslEngineOptions(new JdkSSLEngineOptions());
+                cipherSuites.forEach(httpOptions::addEnabledCipherSuite);
+            }
         }
 
         return httpOptions;
