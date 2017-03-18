@@ -69,28 +69,36 @@ public class PemLoader {
         return pems;
     }
 
-    public static PrivateKey loadPrivateKey(Buffer keyValue) throws Exception {
+    public static PrivateKey loadPrivateKey(Buffer keyValue) {
         if (keyValue == null) {
             throw new RuntimeException("Missing private key path");
         }
-        byte[] value = loadPem(keyValue, "PRIVATE KEY").get(0);
-        KeyFactory rsaKeyFactory = KeyFactory.getInstance("RSA");
-        return rsaKeyFactory.generatePrivate(new PKCS8EncodedKeySpec(value));
+        try {
+            byte[] value = loadPem(keyValue, "PRIVATE KEY").get(0);
+            KeyFactory rsaKeyFactory = KeyFactory.getInstance("RSA");
+            return rsaKeyFactory.generatePrivate(new PKCS8EncodedKeySpec(value));
+        } catch (Exception e) {
+            throw new RuntimeException("Problem loading private key", e);
+        }
     }
 
-    public static X509Certificate[] loadCerts(Buffer buffer) throws Exception {
+    public static X509Certificate[] loadCerts(Buffer buffer) {
         if (buffer == null) {
             throw new RuntimeException("Missing X.509 certificate path");
         }
-        List<byte[]> pems = loadPem(buffer, "CERTIFICATE");
-        CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
-        List<X509Certificate> certs = new ArrayList<>(pems.size());
-        for (byte[] pem : pems) {
-            for (Certificate cert : certFactory.generateCertificates(new ByteArrayInputStream(pem))) {
-                certs.add((X509Certificate) cert);
+        try {
+            List<byte[]> pems = loadPem(buffer, "CERTIFICATE");
+            CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
+            List<X509Certificate> certs = new ArrayList<>(pems.size());
+            for (byte[] pem : pems) {
+                for (Certificate cert : certFactory.generateCertificates(new ByteArrayInputStream(pem))) {
+                    certs.add((X509Certificate) cert);
+                }
             }
+            return certs.toArray(new X509Certificate[certs.size()]);
+        } catch (Exception e) {
+            throw new RuntimeException("Problem loading certificate chain", e);
         }
-        return certs.toArray(new X509Certificate[certs.size()]);
     }
 
     /**

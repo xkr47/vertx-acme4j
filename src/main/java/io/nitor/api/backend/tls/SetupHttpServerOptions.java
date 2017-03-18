@@ -73,18 +73,14 @@ public class SetupHttpServerOptions {
                 .addEnabledSecureTransportProtocol("TLSv1.3");
 
         // server side certificates
-        new DynamicCertManager(vertx, dynamicCertOptions, "default").init();
+        DynamicCertManager.init(vertx, dynamicCertOptions, "default");
 
         class State {
             PrivateKey key;
             Certificate[] chain;
             void keyBuffer(AsyncResult<Buffer> keyBuffer) {
                 vertx.executeBlocking((Future<PrivateKey> fut) -> {
-                    try {
-                        fut.complete(PemLoader.loadPrivateKey(keyBuffer.result()));
-                    } catch (Exception e) {
-                        fut.fail(e);
-                    }
+                    fut.complete(PemLoader.loadPrivateKey(keyBuffer.result()));
                 }, evt -> {
                     key = evt.result();
                     check();
@@ -92,11 +88,7 @@ public class SetupHttpServerOptions {
             }
             void certBuffer(AsyncResult<Buffer> certBuffer) {
                 vertx.executeBlocking((Future<Certificate[]> fut) -> {
-                    try {
-                        fut.complete(PemLoader.loadCerts(certBuffer.result()));
-                    } catch (Exception e) {
-                        fut.fail(e);
-                    }
+                    fut.complete(PemLoader.loadCerts(certBuffer.result()));
                 }, evt -> {
                     chain = evt.result();
                     check();
@@ -104,7 +96,7 @@ public class SetupHttpServerOptions {
             }
             void check() {
                 if (key != null && chain != null) {
-                    vertx.eventBus().publish("keystore.put", new DynamicCertManager.CertCombo("default", key, chain));
+                    DynamicCertManager.put("default", key, chain);
                 }
             }
         }
@@ -148,6 +140,8 @@ public class SetupHttpServerOptions {
 
 
     public static class DynamicCertManager {
+        static final Logger logger = LogManager.getLogger(DynamicCertManager.class);
+
         public static class CertCombo {
             String id; // for removing/updating later
             Certificate[] chain;
@@ -160,34 +154,34 @@ public class SetupHttpServerOptions {
             }
         }
 
-        private final Vertx vertx;
-        private final DynamicCertOptions opts;
-        private final String idOfDefaultAlias;
-        private final Map<String, CertCombo> map = new HashMap<>();
+        private static Vertx vertx;
+        private static DynamicCertOptions opts;
+        private static String idOfDefaultAlias;
+        private static Map<String, CertCombo> map = new HashMap<>();
 
-        public DynamicCertManager(Vertx vertx, DynamicCertOptions opts, String idOfDefaultAlias) {
-            this.vertx = vertx;
-            this.opts = opts;
-            this.idOfDefaultAlias = idOfDefaultAlias;
+        public static void init(Vertx vertx, DynamicCertOptions opts, String idOfDefaultAlias) {
+            DynamicCertManager.vertx = vertx;
+            DynamicCertManager.opts = opts;
+            DynamicCertManager.idOfDefaultAlias = idOfDefaultAlias;
         }
 
-        public void init() {
-            vertx.eventBus().consumer("keystore.put", event -> {
-                CertCombo cc = (CertCombo) event.body();
-                CertCombo old = map.put(cc.id, cc);
-                logger.info((old != null ? "Replacing" : "Installing") + " cert for " + cc.id);
-                update();
-            });
-
-            vertx.eventBus().consumer("keystore.remove", event -> {
-                String id = (String) event.body();
-                CertCombo old = map.remove(id);
-                logger.info((old != null ? "Removing cert" : "Nothing cert to remove") + " for " + id);
-                update();
-            });
+        public static void put(String id, PrivateKey key, Certificate[] chain) {
+            put(new CertCombo(id, key, chain));
         }
 
-        void update() {
+        public static void put(CertCombo cc) {
+            CertCombo old = map.put(cc.id, cc);
+            logger.info((old != null ? "Replacing" : "Installing") + " cert for " + cc.id);
+            update();
+        }
+
+        public static void remove(String id) {
+            CertCombo old = map.remove(id);
+            logger.info((old != null ? "Removing cert" : "Nothing cert to remove") + " for " + id);
+            update();
+        }
+
+        private static void update() {
             try {
                 KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
                 keyStore.load(null, null);
@@ -198,7 +192,7 @@ public class SetupHttpServerOptions {
                         defaultAlias = defaultAliasCandidate;
                     }
                 }
-                logger.info("Reloading certificates: ", map.values().stream().map(cc -> cc.id).collect(toList()));
+                logger.info("Reloading certificates: {}", map.values().stream().map(cc -> cc.id).collect(toList()));
                 opts.load(defaultAlias, keyStore, new char[0]);
             } catch (IOException e) {
                 e.printStackTrace();
