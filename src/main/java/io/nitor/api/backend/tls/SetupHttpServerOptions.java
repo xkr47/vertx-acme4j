@@ -15,6 +15,8 @@
  */
 package io.nitor.api.backend.tls;
 
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpServerOptions;
@@ -27,16 +29,21 @@ import org.apache.logging.log4j.Logger;
 import org.shredzone.acme4j.util.CertificateUtils;
 import org.shredzone.acme4j.util.KeyPairUtils;
 
-import java.security.KeyPair;
-import java.security.KeyStore;
+import java.io.IOException;
+import java.security.*;
 import java.security.cert.Certificate;
+import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static io.vertx.core.http.ClientAuth.REQUEST;
 import static io.vertx.core.http.HttpVersion.HTTP_1_1;
 import static java.util.Arrays.asList;
 import static java.util.concurrent.TimeUnit.MINUTES;
+import static java.util.stream.Collectors.toList;
 
 public class SetupHttpServerOptions {
     // syntax is in JVM SSL format
@@ -66,29 +73,45 @@ public class SetupHttpServerOptions {
                 .addEnabledSecureTransportProtocol("TLSv1.3");
 
         // server side certificates
+        new DynamicCertManager(vertx, dynamicCertOptions, "default").init();
+
         class State {
-            Buffer keyBuffer, certBuffer;
-            void check() {
-                if (keyBuffer != null && certBuffer != null) {
+            PrivateKey key;
+            Certificate[] chain;
+            void keyBuffer(AsyncResult<Buffer> keyBuffer) {
+                vertx.executeBlocking((Future<PrivateKey> fut) -> {
                     try {
-                        KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
-                        keyStore.load(null, null);
-                        String defaultAlias = PemLoader.importKeyAndCertsToStore(keyStore, PemLoader.loadPrivateKey(keyBuffer), PemLoader.loadCerts(certBuffer));
-
-                        KeyPair sniKeyPair = KeyPairUtils.createKeyPair(2048);
-                        X509Certificate cert = CertificateUtils.createTlsSni02Certificate(sniKeyPair, "lol1", "lol2");
-                        PemLoader.importKeyAndCertsToStore(keyStore, sniKeyPair.getPrivate(), new Certificate[] { cert });
-
-                        dynamicCertOptions.load(defaultAlias, keyStore, new char[0]);
+                        fut.complete(PemLoader.loadPrivateKey(keyBuffer.result()));
                     } catch (Exception e) {
-                        throw new RuntimeException(e);
+                        fut.fail(e);
                     }
+                }, evt -> {
+                    key = evt.result();
+                    check();
+                });
+            }
+            void certBuffer(AsyncResult<Buffer> certBuffer) {
+                vertx.executeBlocking((Future<Certificate[]> fut) -> {
+                    try {
+                        fut.complete(PemLoader.loadCerts(certBuffer.result()));
+                    } catch (Exception e) {
+                        fut.fail(e);
+                    }
+                }, evt -> {
+                    chain = evt.result();
+                    check();
+                });
+            }
+            void check() {
+                if (key != null && chain != null) {
+                    vertx.eventBus().publish("keystore.put", new DynamicCertManager.CertCombo("default", key, chain));
                 }
             }
         }
+
         final State state = new State();
-        vertx.fileSystem().readFile(tls.getString("serverKey"), keyBuffer -> { state.keyBuffer = keyBuffer.result(); state.check(); });
-        vertx.fileSystem().readFile(tls.getString("serverCert"), certBuffer -> { state.certBuffer = certBuffer.result(); state.check(); });
+        vertx.fileSystem().readFile(tls.getString("serverKey"), state::keyBuffer);
+        vertx.fileSystem().readFile(tls.getString("serverCert"), state::certBuffer);
 
         if (!config.getBoolean("http2", true)) {
             httpOptions.setAlpnVersions(asList(HTTP_1_1));
@@ -121,5 +144,73 @@ public class SetupHttpServerOptions {
         return name.replace("TLS_", "")
                 .replace("WITH_AES_", "AES")
                 .replace('_', '-');
+    }
+
+
+    public static class DynamicCertManager {
+        public static class CertCombo {
+            String id; // for removing/updating later
+            Certificate[] chain;
+            PrivateKey key;
+
+            public CertCombo(String id, PrivateKey key, Certificate[] chain) {
+                this.id = id;
+                this.key = key;
+                this.chain = chain;
+            }
+        }
+
+        private final Vertx vertx;
+        private final DynamicCertOptions opts;
+        private final String idOfDefaultAlias;
+        private final Map<String, CertCombo> map = new HashMap<>();
+
+        public DynamicCertManager(Vertx vertx, DynamicCertOptions opts, String idOfDefaultAlias) {
+            this.vertx = vertx;
+            this.opts = opts;
+            this.idOfDefaultAlias = idOfDefaultAlias;
+        }
+
+        public void init() {
+            vertx.eventBus().consumer("keystore.put", event -> {
+                CertCombo cc = (CertCombo) event.body();
+                CertCombo old = map.put(cc.id, cc);
+                logger.info((old != null ? "Replacing" : "Installing") + " cert for " + cc.id);
+                update();
+            });
+
+            vertx.eventBus().consumer("keystore.remove", event -> {
+                String id = (String) event.body();
+                CertCombo old = map.remove(id);
+                logger.info((old != null ? "Removing cert" : "Nothing cert to remove") + " for " + id);
+                update();
+            });
+        }
+
+        void update() {
+            try {
+                KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
+                keyStore.load(null, null);
+                String defaultAlias = "dummy";
+                for (CertCombo cc : map.values()) {
+                    String defaultAliasCandidate = PemLoader.importKeyAndCertsToStore(keyStore, cc.key, cc.chain);
+                    if (cc.id.equals(idOfDefaultAlias)) {
+                        defaultAlias = defaultAliasCandidate;
+                    }
+                }
+                logger.info("Reloading certificates: ", map.values().stream().map(cc -> cc.id).collect(toList()));
+                opts.load(defaultAlias, keyStore, new char[0]);
+            } catch (IOException e) {
+                e.printStackTrace();
+            } catch (CertificateException e) {
+                e.printStackTrace();
+            } catch (NoSuchAlgorithmException e) {
+                e.printStackTrace();
+            } catch (KeyStoreException e) {
+                e.printStackTrace();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
     }
 }
