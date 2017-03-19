@@ -15,6 +15,7 @@
  */
 package io.nitor.api.backend.tls;
 
+import io.nitor.api.backend.LetsEncrypt;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -26,18 +27,14 @@ import io.vertx.core.net.OpenSSLEngineOptions;
 import io.vertx.core.net.PemTrustOptions;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.shredzone.acme4j.util.CertificateUtils;
-import org.shredzone.acme4j.util.KeyPairUtils;
 
 import java.io.IOException;
 import java.security.*;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
-import java.security.cert.X509Certificate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static io.vertx.core.http.ClientAuth.REQUEST;
 import static io.vertx.core.http.HttpVersion.HTTP_1_1;
@@ -81,6 +78,12 @@ public class SetupHttpServerOptions {
 
             // server side certificates
             DynamicCertManager.init(vertx, dynamicCertOptions, "default");
+
+            vertx.executeBlocking(future -> {
+                future.complete(new LetsEncrypt());
+            }, false, ar -> {
+                logger.info("LetsEncrypt completed", ar.cause());
+            });
 
             class State {
                 PrivateKey key;
@@ -155,13 +158,13 @@ public class SetupHttpServerOptions {
 
         public static class CertCombo {
             String id; // for removing/updating later
-            Certificate[] chain;
+            Certificate[] certWithChain;
             PrivateKey key;
 
-            public CertCombo(String id, PrivateKey key, Certificate[] chain) {
+            public CertCombo(String id, PrivateKey key, Certificate[] certWithChain) {
                 this.id = id;
                 this.key = key;
-                this.chain = chain;
+                this.certWithChain = certWithChain;
             }
         }
 
@@ -176,17 +179,28 @@ public class SetupHttpServerOptions {
             DynamicCertManager.idOfDefaultAlias = idOfDefaultAlias;
         }
 
-        public static void put(String id, PrivateKey key, Certificate[] chain) {
-            put(new CertCombo(id, key, chain));
+        public static void put(String id, PrivateKey key, Certificate cert, Certificate... chain) {
+            put(id, key, merge(cert, chain));
         }
 
-        public static void put(CertCombo cc) {
+        public static Certificate[] merge(Certificate cert, Certificate[] chain) {
+            Certificate[] result = new Certificate[chain.length + 1];
+            result[0] = cert;
+            System.arraycopy(chain, 0, result, 1, chain.length);
+            return result;
+        }
+
+        public static void put(String id, PrivateKey key, Certificate[] certWithChain) {
+            put(new CertCombo(id, key, certWithChain));
+        }
+
+        public static synchronized void put(CertCombo cc) {
             CertCombo old = map.put(cc.id, cc);
             logger.info((old != null ? "Replacing" : "Installing") + " cert for " + cc.id);
             update();
         }
 
-        public static void remove(String id) {
+        public static synchronized void remove(String id) {
             CertCombo old = map.remove(id);
             logger.info((old != null ? "Removing cert" : "Nothing cert to remove") + " for " + id);
             update();
@@ -198,7 +212,7 @@ public class SetupHttpServerOptions {
                 keyStore.load(null, null);
                 String defaultAlias = "dummy";
                 for (CertCombo cc : map.values()) {
-                    String defaultAliasCandidate = PemLoader.importKeyAndCertsToStore(keyStore, cc.key, cc.chain);
+                    String defaultAliasCandidate = PemLoader.importKeyAndCertsToStore(keyStore, cc.key, cc.certWithChain);
                     if (cc.id.equals(idOfDefaultAlias)) {
                         defaultAlias = defaultAliasCandidate;
                     }

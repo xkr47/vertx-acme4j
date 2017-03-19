@@ -48,7 +48,7 @@ public class DynamicCertOptions implements KeyCertOptions {
     static class MyKeyManager extends X509ExtendedKeyManager {
 
         private String defaultAlias;
-        private X509ExtendedKeyManager wrapped;
+        private volatile X509ExtendedKeyManager wrapped;
 
         public void load(String defaultAlias, KeyStore ks, char[] passwd) throws UnrecoverableKeyException, KeyStoreException {
             try {

@@ -97,21 +97,21 @@ public class PemLoader {
             }
             return certs.toArray(new X509Certificate[certs.size()]);
         } catch (Exception e) {
-            throw new RuntimeException("Problem loading certificate chain", e);
+            throw new RuntimeException("Problem loading certificate certWithChain", e);
         }
     }
 
     /**
      * @return primary name of the certificate
      */
-    public static String importKeyAndCertsToStore(KeyStore keyStore, PrivateKey key, Certificate[] chain) throws Exception {
-        KeyStore.PrivateKeyEntry pke = new KeyStore.PrivateKeyEntry(key, chain);
+    public static String importKeyAndCertsToStore(KeyStore keyStore, PrivateKey key, Certificate[] certWithChain) throws Exception {
+        KeyStore.PrivateKeyEntry pke = new KeyStore.PrivateKeyEntry(key, certWithChain);
         KeyStore.PasswordProtection pass = new KeyStore.PasswordProtection(new char[0]);
-        List<String> certSubjectCn = getCertSubjectCn(chain[0]);
+        List<String> certSubjectCn = getCertSubjectCn(certWithChain[0]);
         for (String alias : certSubjectCn) {
             keyStore.setEntry(alias, pke, pass);
         }
-        for (String alias : getCertSan(chain[0])) {
+        for (String alias : getCertSan(certWithChain[0])) {
             keyStore.setEntry(alias, pke, pass);
         }
         return certSubjectCn.get(0);
