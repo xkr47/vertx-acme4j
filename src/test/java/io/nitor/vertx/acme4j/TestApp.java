@@ -15,6 +15,9 @@
  */
 package io.nitor.vertx.acme4j;
 
+import io.nitor.vertx.acme4j.tls.AcmeManager;
+import io.nitor.vertx.acme4j.tls.DynamicCertManager;
+import io.nitor.vertx.acme4j.tls.DynamicCertOptions;
 import io.nitor.vertx.acme4j.tls.SetupHttpServerOptions;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Launcher;
@@ -65,11 +68,21 @@ public class TestApp extends AbstractVerticle
            logger.error("Fallback exception handler got", e);
         });
 
-        HttpServerOptions httpServerOptions = SetupHttpServerOptions.createHttpServerOptions(vertx);
+        // server side certificates
+        DynamicCertOptions dynamicCertOptions = new DynamicCertOptions();
+        HttpServerOptions httpServerOptions = SetupHttpServerOptions.createHttpServerOptions(vertx, dynamicCertOptions);
 
         vertx.createHttpServer(httpServerOptions)
                 .requestHandler(this::handle)
                 .listen(listenPort);
+
+        DynamicCertManager certManager = new DynamicCertManager(vertx, dynamicCertOptions, "default");
+
+        vertx.executeBlocking(future -> {
+            future.complete(new AcmeManager(certManager));
+        }, false, ar -> {
+            logger.info("AcmeManager completed", ar.cause());
+        });
     }
 
     void handle(HttpServerRequest req) {

@@ -15,7 +15,6 @@
  */
 package io.nitor.vertx.acme4j.tls;
 
-import io.nitor.api.backend.tls.SetupHttpServerOptions.DynamicCertManager;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.shredzone.acme4j.*;
@@ -51,8 +50,10 @@ public class AcmeManager {
     static final String AGREEMENT_URI = "https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf";
 
     private static Logger logger = LogManager.getLogger(AcmeManager.class);
+    private final DynamicCertManager dynamicCertManager;
 
-    public AcmeManager() {
+    public AcmeManager(DynamicCertManager dynamicCertManager) {
+        this.dynamicCertManager = dynamicCertManager;
         try {
             KeyPair accountKeyPair = getOrCreateAccountKeyPair();
             Session session = new Session(new URI(ACME_SERVER_URI), accountKeyPair);
@@ -121,7 +122,7 @@ public class AcmeManager {
         }
 
         logger.info("Installing certificate");
-        DynamicCertManager.put("letsencrypt-cert-" + domainNames[0], domainKeyPair.getPrivate(), cert, chain);
+        dynamicCertManager.put("letsencrypt-cert-" + domainNames[0], domainKeyPair.getPrivate(), cert, chain);
     }
 
     private static final String[] SUPPORTED_CHALLENGES = {
@@ -148,7 +149,7 @@ public class AcmeManager {
         }
         final String id = "letsencrypt-challenge-" + domainName;
         try {
-            DynamicCertManager.put(id, sniKeyPair.getPrivate(), cert);
+            dynamicCertManager.put(id, sniKeyPair.getPrivate(), cert);
             logger.info("Challenge {} prepared, executing..", challenge.getType());
             challenge.trigger();
 
@@ -173,7 +174,7 @@ public class AcmeManager {
                 throw new RuntimeException("Challenge " + challenge.getType() + " for " + domainName + " failed with status " + challenge.getStatus());
             }
         } finally {
-            DynamicCertManager.remove(id);
+            dynamicCertManager.remove(id);
             logger.info("Challenge {} cleaned up", challenge.getType());
         }
     }
