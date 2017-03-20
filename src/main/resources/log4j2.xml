@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration monitorInterval="30">
+    <Appenders>
+        <Console name="CONSOLE" target="SYSTEM_OUT">
+            <PatternLayout pattern="%style{%d}{bright,blue} %highlight{%-5p}%highlight{ %c{1.} [%t] %m%n%rEx}{FATAL=bright red, ERROR=bright red, WARN=bright yellow, INFO=Normal, DEBUG=Normal, TRACE=Normal}"/>
+        </Console>
+        <RollingRandomAccessFile name="FILE"
+                                 fileName="vertx.log"
+                                 filePattern="./vertx-%d{yyyy-MM-dd}-%i.log.gz"
+                                 immediateFlush="false">
+            <PatternLayout charset="UTF-8">
+                <Pattern>%d %-5p %c{1.} [%t] %m%n%rEx</Pattern>
+            </PatternLayout>
+            <Policies>
+                <OnStartupTriggeringPolicy/>
+                <TimeBasedTriggeringPolicy/>
+                <SizeBasedTriggeringPolicy size="1000 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="20"/>
+        </RollingRandomAccessFile>
+    </Appenders>
+    <Loggers>
+        <AsyncLogger name="io.nitor" level="trace"/>
+        <AsyncRoot level="info">
+            <AppenderRef ref="CONSOLE"/>
+            <AppenderRef ref="FILE"/>
+        </AsyncRoot>
+    </Loggers>
+</Configuration>
