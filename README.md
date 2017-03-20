@@ -1,5 +1,5 @@
 # vertx-acme4j
-vert.x adaptation of [acme4j](https://github.com/shred/acme4j) (Let's Encrypt)
+[vert.x](https://github.com/eclipse/vert.x/) adaptation of [acme4j](https://github.com/shred/acme4j) (Let's Encrypt)
 
 # Pros (?)
 * supports only tls-sni-01 and tls-sni-02 challenges, which means all challenges happen through the same port 443 as the server itself
