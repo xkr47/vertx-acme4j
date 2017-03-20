@@ -65,7 +65,7 @@ public class TestApp extends AbstractVerticle
            logger.error("Fallback exception handler got", e);
         });
 
-        HttpServerOptions httpServerOptions = SetupHttpServerOptions.createHttpServerOptions(vertx, config());
+        HttpServerOptions httpServerOptions = SetupHttpServerOptions.createHttpServerOptions(vertx);
 
         vertx.createHttpServer(httpServerOptions)
                 .requestHandler(this::handle)
