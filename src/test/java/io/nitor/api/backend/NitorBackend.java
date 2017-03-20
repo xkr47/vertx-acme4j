@@ -71,8 +71,8 @@ public class NitorBackend extends AbstractVerticle
     }
 
     private static void setupLogging() {
-        if (exists(Paths.get("log4j2.xml"))) {
-            setProperty("log4j.configurationFile", "log4j2.xml");
+        if (exists(Paths.get("src/test/resources/log4j2.xml"))) {
+            setProperty("log4j.configurationFile", "src/test/resources/log4j2.xml");
         }
         setProperty("java.util.logging.manager", "org.apache.logging.log4j.jul.LogManager");
         setProperty("vertx.logger-delegate-factory-class-name", "io.vertx.core.logging.Log4j2LogDelegateFactory");
