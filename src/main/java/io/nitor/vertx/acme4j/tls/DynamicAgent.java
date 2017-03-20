@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2016-2017 Nitor Creations Oy
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.nitor.api.backend.tls;
+package io.nitor.vertx.acme4j.tls;
 
 import static java.lang.System.err;
 import static java.lang.System.getProperty;
@@ -35,6 +35,10 @@ import java.util.stream.Stream;
 
 import org.mortbay.jetty.alpn.agent.Premain;
 
+/**
+ * Imported from https://github.com/NitorCreations/nitor-backend/
+ * @author Mikko Tiihonen / Nitor Creations Oy
+ */
 public class DynamicAgent {
     public static void agentmain(String args, Instrumentation inst) throws Exception {
         Premain.premain(args, inst);

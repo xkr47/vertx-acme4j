@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2016-2017 Nitor Creations Oy, Jonas Berlin
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,33 +13,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.nitor.api.backend.tls;
+package io.nitor.vertx.acme4j.tls;
 
-import io.nitor.api.backend.LetsEncrypt;
-import io.vertx.core.AsyncResult;
-import io.vertx.core.Future;
 import io.vertx.core.Vertx;
-import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpServerOptions;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.JdkSSLEngineOptions;
 import io.vertx.core.net.OpenSSLEngineOptions;
-import io.vertx.core.net.PemTrustOptions;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
-import java.security.*;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static io.vertx.core.http.ClientAuth.REQUEST;
 import static io.vertx.core.http.HttpVersion.HTTP_1_1;
 import static java.util.Arrays.asList;
-import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.stream.Collectors.toList;
 
 public class SetupHttpServerOptions {
@@ -50,97 +46,46 @@ public class SetupHttpServerOptions {
             "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
             "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"
     );
+    private static final boolean USE_OPENSSL = false;
 
     static final Logger logger = LogManager.getLogger(SetupHttpServerOptions.class);
 
-    public static HttpServerOptions createHttpServerOptions(Vertx vertx, JsonObject config) {
-        JsonObject tls = config.getJsonObject("tls");
-        DynamicCertOptions dynamicCertOptions = new DynamicCertOptions();
+    public static HttpServerOptions createHttpServerOptions(Vertx vertx) {
         HttpServerOptions httpOptions = new HttpServerOptions()
                 // basic TCP/HTTP options
                 .setReuseAddress(true)
                 .setCompressionSupported(false) // otherwise it automatically compresses based on response headers even if pre-compressed with e.g. proxy
-                .setUsePooledBuffers(true)
-                // TODO: upcoming in vertx 3.4+ .setCompressionLevel(2)
-                .setIdleTimeout(config.getInteger("idleTimeout", (int) MINUTES.toSeconds(10)));
+                .setUsePooledBuffers(true);
 
-        if (!config.getBoolean("http2", true)) {
-            httpOptions.setAlpnVersions(asList(HTTP_1_1));
-        }
+        DynamicCertOptions dynamicCertOptions = new DynamicCertOptions();
+        httpOptions
+                .setSsl(true)
+                .setKeyCertOptions(dynamicCertOptions)
+                // TLS tuning
+                .addEnabledSecureTransportProtocol("TLSv1.2")
+                .addEnabledSecureTransportProtocol("TLSv1.3");
 
-        if (tls != null) {
+        // server side certificates
+        DynamicCertManager.init(vertx, dynamicCertOptions, "default");
+
+        vertx.executeBlocking(future -> {
+            future.complete(new AcmeManager());
+        }, false, ar -> {
+            logger.info("AcmeManager completed", ar.cause());
+        });
+
+        if (USE_OPENSSL) {
+            // TODO this has not really been tested with SNI yet
             httpOptions
-                    .setSsl(true)
-                    .setKeyCertOptions(dynamicCertOptions)
-                    // TLS tuning
-                    .addEnabledSecureTransportProtocol("TLSv1.2")
-                    .addEnabledSecureTransportProtocol("TLSv1.3");
-
-            // server side certificates
-            DynamicCertManager.init(vertx, dynamicCertOptions, "default");
-
-            vertx.executeBlocking(future -> {
-                future.complete(new LetsEncrypt());
-            }, false, ar -> {
-                logger.info("LetsEncrypt completed", ar.cause());
-            });
-
-            class State {
-                PrivateKey key;
-                Certificate[] chain;
-
-                void keyBuffer(AsyncResult<Buffer> keyBuffer) {
-                    vertx.executeBlocking((Future<PrivateKey> fut) -> {
-                        fut.complete(PemLoader.loadPrivateKey(keyBuffer.result()));
-                    }, evt -> {
-                        key = evt.result();
-                        check();
-                    });
-                }
-
-                void certBuffer(AsyncResult<Buffer> certBuffer) {
-                    vertx.executeBlocking((Future<Certificate[]> fut) -> {
-                        fut.complete(PemLoader.loadCerts(certBuffer.result()));
-                    }, evt -> {
-                        chain = evt.result();
-                        check();
-                    });
-                }
-
-                void check() {
-                    if (key != null && chain != null) {
-                        DynamicCertManager.put("default", key, chain);
-                    }
-                }
-            }
-
-            final State state = new State();
-            vertx.fileSystem().readFile(tls.getString("serverKey"), state::keyBuffer);
-            vertx.fileSystem().readFile(tls.getString("serverCert"), state::certBuffer);
-
-            if (!config.getBoolean("http2", true)) {
-                httpOptions.setAlpnVersions(asList(HTTP_1_1));
-            }
-            JsonObject clientAuth = config.getJsonObject("clientAuth");
-            if (httpOptions.isSsl() && clientAuth != null && clientAuth.getString("clientChain") != null) {
-                // client side certificate
-                httpOptions.setClientAuth(REQUEST)
-                        .setTrustOptions(new PemTrustOptions()
-                                .addCertPath(clientAuth.getString("clientChain"))
-                        );
-            }
-            if (config.getBoolean("useNativeOpenSsl")) {
-                httpOptions
-                        .setUseAlpn(true)
-                        .setSslEngineOptions(new OpenSSLEngineOptions());
-                cipherSuites.stream().map(SetupHttpServerOptions::javaCipherNameToOpenSSLName)
-                        .forEach(httpOptions::addEnabledCipherSuite);
-            } else {
-                httpOptions
-                        .setUseAlpn(DynamicAgent.enableJettyAlpn())
-                        .setJdkSslEngineOptions(new JdkSSLEngineOptions());
-                cipherSuites.forEach(httpOptions::addEnabledCipherSuite);
-            }
+                    .setUseAlpn(true)
+                    .setSslEngineOptions(new OpenSSLEngineOptions());
+            cipherSuites.stream().map(SetupHttpServerOptions::javaCipherNameToOpenSSLName)
+                    .forEach(httpOptions::addEnabledCipherSuite);
+        } else {
+            httpOptions
+                    .setUseAlpn(DynamicAgent.enableJettyAlpn())
+                    .setJdkSslEngineOptions(new JdkSSLEngineOptions());
+            cipherSuites.forEach(httpOptions::addEnabledCipherSuite);
         }
 
         return httpOptions;
@@ -151,7 +96,6 @@ public class SetupHttpServerOptions {
                 .replace("WITH_AES_", "AES")
                 .replace('_', '-');
     }
-
 
     public static class DynamicCertManager {
         static final Logger logger = LogManager.getLogger(DynamicCertManager.class);

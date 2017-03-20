@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2017 Nitor Creations Oy
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,8 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.nitor.api.backend.session;
+package io.nitor.vertx.acme4j;
 
+/*
 import com.example.mockito.MockitoExtension;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.json.JsonObject;
@@ -45,8 +46,11 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+
 @Extensions(@ExtendWith(MockitoExtension.class))
-class CookieSessionHandlerTest {
+*/
+class SampleMockitoTest {
+/*
     private CookieSessionHandler handler;
     private StatelessSession session;
     private ArgumentCaptor<StatelessSession> newSession = forClass(StatelessSession.class);
@@ -112,4 +116,5 @@ class CookieSessionHandlerTest {
         assertThat(session.hasSourceIpSession("remoteIp"), is(true));
         verify(ctx).addCookie(cookie);
     }
+*/
 }

@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2017 Jonas Berlin
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,13 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.nitor.api.backend.tls;
+package io.nitor.vertx.acme4j.tls;
 
 import io.vertx.core.buffer.Buffer;
 
 import javax.naming.InvalidNameException;
 import javax.naming.ldap.LdapName;
-import javax.naming.ldap.Rdn;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.security.KeyFactory;
@@ -30,8 +29,10 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.CertificateParsingException;
 import java.security.cert.X509Certificate;
 import java.security.spec.PKCS8EncodedKeySpec;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Collection;
+import java.util.List;
 
 import static java.util.Collections.emptyList;
 import static java.util.stream.Collectors.toList;
@@ -102,7 +103,7 @@ public class PemLoader {
     }
 
     /**
-     * @return primary name of the certificate
+     * @return primary (subject) name of the certificate
      */
     public static String importKeyAndCertsToStore(KeyStore keyStore, PrivateKey key, Certificate[] certWithChain) throws Exception {
         KeyStore.PrivateKeyEntry pke = new KeyStore.PrivateKeyEntry(key, certWithChain);

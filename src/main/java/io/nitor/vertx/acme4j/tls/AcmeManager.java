@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2016-2017 Nitor Creations Oy, Jonas Berlin
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.nitor.api.backend;
+package io.nitor.vertx.acme4j.tls;
 
 import io.nitor.api.backend.tls.SetupHttpServerOptions.DynamicCertManager;
 import org.apache.logging.log4j.LogManager;
@@ -37,9 +37,8 @@ import java.security.KeyPair;
 import java.security.cert.X509Certificate;
 import java.util.Collection;
 import java.util.Date;
-import java.util.function.Supplier;
 
-public class LetsEncrypt {
+public class AcmeManager {
 
     static final String DOMAIN_KEY_PAIR_FILE = "letsencrypt-keypair.pem";
     static final String DOMAIN_ACCOUNT_LOCATION_FILE = "letsencrypt-accountLocation.txt";
@@ -51,9 +50,9 @@ public class LetsEncrypt {
 
     static final String AGREEMENT_URI = "https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf";
 
-    private static Logger logger = LogManager.getLogger(LetsEncrypt.class);
+    private static Logger logger = LogManager.getLogger(AcmeManager.class);
 
-    public LetsEncrypt() {
+    public AcmeManager() {
         try {
             KeyPair accountKeyPair = getOrCreateAccountKeyPair();
             Session session = new Session(new URI(ACME_SERVER_URI), accountKeyPair);
@@ -87,7 +86,7 @@ public class LetsEncrypt {
             createCertificate(registration, DOMAIN_NAMES, ORGANIZATION);
             logger.info("Certificate successfully activated. All done.");
         } catch (Exception e) {
-            throw new RuntimeException("LetsEncrypt error", e);
+            throw new RuntimeException("AcmeManager error", e);
         }
     }
 
