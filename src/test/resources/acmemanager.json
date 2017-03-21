@@ -1,0 +1,29 @@
+{
+  "acme": {
+    "dbPath": ".acmemanager",
+    "accounts": [
+      {
+        "id": "nitor-srv01",
+        "provider": "acme://letsencrypt.org/...",
+        "acceptedAgreement": "https://letsencrypt.org/.../Agreement_v1.2.3.pdf",
+        "certificates": [
+          {
+            "id": "conflu",
+            "organiztion": "My Conflu Organization",
+            "hostnames": [
+              "conflu.example.org",
+              "admin.conflu.example.org"
+            ]
+          },
+          {
+            "id": "cv",
+            "organization": "...",
+            "hostnames": [
+              "cv.example.org"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

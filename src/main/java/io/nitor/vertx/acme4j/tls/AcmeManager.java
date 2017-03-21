@@ -15,6 +15,8 @@
  */
 package io.nitor.vertx.acme4j.tls;
 
+import io.vertx.core.Vertx;
+import io.vertx.core.json.JsonObject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.shredzone.acme4j.*;
@@ -36,6 +38,9 @@ import java.security.KeyPair;
 import java.security.cert.X509Certificate;
 import java.util.Collection;
 import java.util.Date;
+import java.util.List;
+import java.util.Scanner;
+import java.util.stream.Collectors;
 
 public class AcmeManager {
 
@@ -50,10 +55,86 @@ public class AcmeManager {
     static final String AGREEMENT_URI = "https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf";
 
     private static Logger logger = LogManager.getLogger(AcmeManager.class);
+
+    private final Vertx vertx;
     private final DynamicCertManager dynamicCertManager;
 
-    public AcmeManager(DynamicCertManager dynamicCertManager) {
+    private String dbPath;
+
+    public AcmeManager(Vertx vertx, DynamicCertManager dynamicCertManager) {
+        this.vertx = vertx;
         this.dynamicCertManager = dynamicCertManager;
+    }
+
+    private JsonObject readConf() {
+        InputStream defaultsConf = getClass().getResourceAsStream("/config.json");
+        return defaultsConf == null ? null : new JsonObject(toStr(defaultsConf));
+    }
+
+    private String toStr(InputStream is) {
+        // http://stackoverflow.com/a/5445161/83741
+        try (Scanner s = new Scanner(is).useDelimiter("\\A")) {
+            return s.hasNext() ? s.next() : "";
+        }
+    }
+
+    public synchronized void reconfigure(JsonObject root) {
+        if (dbPath == null) {
+            dbPath = root.getString("dbPath");
+        } else {
+            if (!dbPath.equals(root.getString("dbPath"))) {
+                logger.warn("Ignoring runtime reconfiguration of dbPath");
+            }
+        }
+
+        for (boolean validate : new boolean[] { true, false }) {
+            root.getJsonArray("accounts").stream().map(JsonObject.class::cast)
+                    .forEach(account ->
+                            reconfigureAccount(account, validate)
+                    );
+        }
+    }
+
+    private void reconfigureAccount(JsonObject account, boolean validate) {
+        String accountId = account.getString("id");
+        if (accountId == null) {
+            throw new IllegalArgumentException("Found account without id");
+        }
+        try {
+            String provider = account.getString("provider");
+            if (provider == null) {
+                throw new IllegalArgumentException("Must specify provider url");
+            }
+            String acceptedAgreement = account.getString("acceptedAgreement");
+            account.getJsonArray("certificates").stream().map(JsonObject.class::cast)
+                    .forEach(certificate ->
+                            reconfigureCertificate(accountId, certificate, validate)
+                    );
+        } catch (Exception e) {
+            throw new RuntimeException("For account " + accountId);
+        }
+    }
+
+    private boolean reconfigureCertificate(String accountId, JsonObject certificate, boolean validate) {
+        String certificateId = certificate.getString("id");
+        if (certificateId == null) {
+            throw new IllegalArgumentException("Found certificate without id");
+        }
+        try {
+            String organization = certificate.getString("organization");
+            List<String> hostnames = certificate.getJsonArray("hostnames").stream().map(String.class::cast)
+                    .distinct()
+                    .collect(Collectors.toList());
+            if (hostnames.isEmpty()) {
+                throw new IllegalArgumentException("Must specify at least one hostname");
+            }
+
+        } catch (Exception e) {
+            throw new RuntimeException("For certificate " +  certificateId);
+        }
+    }
+
+    public void lol() {
         try {
             KeyPair accountKeyPair = getOrCreateAccountKeyPair();
             Session session = new Session(new URI(ACME_SERVER_URI), accountKeyPair);
