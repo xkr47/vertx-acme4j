@@ -1,6 +1,4 @@
 {
-  "acme": {
-    "dbPath": ".acmemanager",
     "accounts": [
       {
         "id": "nitor-srv01",
@@ -25,5 +23,4 @@
         ]
       }
     ]
-  }
 }

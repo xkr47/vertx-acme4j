@@ -58,34 +58,17 @@ public class AcmeManager {
 
     private final Vertx vertx;
     private final DynamicCertManager dynamicCertManager;
+    private final String dbPath;
 
-    private String dbPath;
-
-    public AcmeManager(Vertx vertx, DynamicCertManager dynamicCertManager) {
+    public AcmeManager(Vertx vertx, DynamicCertManager dynamicCertManager, String dbPath) {
         this.vertx = vertx;
         this.dynamicCertManager = dynamicCertManager;
+        this.dbPath = dbPath;
     }
 
-    private JsonObject readConf() {
-        InputStream defaultsConf = getClass().getResourceAsStream("/config.json");
-        return defaultsConf == null ? null : new JsonObject(toStr(defaultsConf));
-    }
-
-    private String toStr(InputStream is) {
-        // http://stackoverflow.com/a/5445161/83741
-        try (Scanner s = new Scanner(is).useDelimiter("\\A")) {
-            return s.hasNext() ? s.next() : "";
-        }
-    }
-
-    public synchronized void reconfigure(JsonObject root) {
-        if (dbPath == null) {
-            dbPath = root.getString("dbPath");
-        } else {
-            if (!dbPath.equals(root.getString("dbPath"))) {
-                logger.warn("Ignoring runtime reconfiguration of dbPath");
-            }
-        }
+    public synchronized void reconfigure(AcmeConfig conf) {
+        conf.validate();
+        conf = conf.clone();
 
         for (boolean validate : new boolean[] { true, false }) {
             root.getJsonArray("accounts").stream().map(JsonObject.class::cast)
