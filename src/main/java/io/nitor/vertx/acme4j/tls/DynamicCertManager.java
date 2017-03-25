@@ -90,7 +90,7 @@ public class DynamicCertManager {
             keyStore.load(null, null);
             String defaultAlias = "dummy";
             for (CertCombo cc : map.values()) {
-                String defaultAliasCandidate = PemLoader.importKeyAndCertsToStore(keyStore, cc.key, cc.certWithChain);
+                String defaultAliasCandidate = KeyStoreUtil.importKeyAndCertsToStore(keyStore, cc.key, cc.certWithChain);
                 if (cc.id.equals(idOfDefaultAlias)) {
                     defaultAlias = defaultAliasCandidate;
                 }

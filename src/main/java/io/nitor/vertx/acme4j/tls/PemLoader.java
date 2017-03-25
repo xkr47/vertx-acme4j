@@ -102,37 +102,4 @@ public class PemLoader {
         }
     }
 
-    /**
-     * @return primary (subject) name of the certificate
-     */
-    public static String importKeyAndCertsToStore(KeyStore keyStore, PrivateKey key, Certificate[] certWithChain) throws Exception {
-        KeyStore.PrivateKeyEntry pke = new KeyStore.PrivateKeyEntry(key, certWithChain);
-        KeyStore.PasswordProtection pass = new KeyStore.PasswordProtection(new char[0]);
-        List<String> certSubjectCn = getCertSubjectCn(certWithChain[0]);
-        for (String alias : certSubjectCn) {
-            keyStore.setEntry(alias, pke, pass);
-        }
-        for (String alias : getCertSan(certWithChain[0])) {
-            keyStore.setEntry(alias, pke, pass);
-        }
-        return certSubjectCn.get(0);
-    }
-
-    private static List<String> getCertSubjectCn(Certificate cert) throws InvalidNameException {
-        return new LdapName(((X509Certificate)cert).getSubjectDN().getName())
-                .getRdns()
-                .stream()
-                .filter(rdn -> rdn.getType().equalsIgnoreCase("CN"))
-                .map(rdn -> (String)rdn.getValue())
-                .collect(toList());
-    }
-
-    private static List<String> getCertSan(Certificate cert) throws CertificateParsingException {
-        Collection<List<?>> san = ((X509Certificate) cert).getSubjectAlternativeNames();
-        if (san == null) return emptyList();
-        return san.stream()
-                .filter(list->list.get(0) == (Integer)2)
-                .map(list -> (String)list.get(1))
-                .collect(toList());
-    }
 }
