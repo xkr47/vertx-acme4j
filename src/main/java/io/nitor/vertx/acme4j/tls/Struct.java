@@ -15,6 +15,11 @@
  */
 package io.nitor.vertx.acme4j.tls;
 
+import java.util.AbstractMap;
+import java.util.Map;
+
+import static java.util.stream.Collectors.toMap;
+
 public abstract class Struct implements Cloneable {
     @Override
     public Object clone() {
@@ -23,5 +28,12 @@ public abstract class Struct implements Cloneable {
         } catch (CloneNotSupportedException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    protected <K,V extends Struct> Map<K,V> cloneMapValues(Map<K,V> map) {
+        return map.entrySet()
+                .stream()
+                .map(a -> new AbstractMap.SimpleEntry<>(a.getKey(), (V) a.getValue().clone()))
+                .collect(toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 }

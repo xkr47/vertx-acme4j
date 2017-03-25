@@ -15,31 +15,36 @@
  */
 package io.nitor.vertx.acme4j.tls;
 
+import java.util.AbstractMap;
+import java.util.AbstractMap.SimpleEntry;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static java.util.stream.Collectors.toList;
+import static java.util.stream.Collectors.toMap;
 
 public class AcmeConfig extends Struct {
-    public List<Account> accounts;
+    public Map<String,Account> accounts;
 
     public void validate() {
         if (accounts == null) throw new NullPointerException();
-        accounts.stream().forEach(Account::validate);
+        accounts.values().stream().forEach(Account::validate);
     }
 
     public static class Account extends Struct {
         public String id;
         public String providerUrl;
         public String acceptedAgreementUrl;
-        public List<Certificate> certificates;
+        public Map<String, Certificate> certificates;
 
-
+        public void validate() {
+        }
 
         @Override
         public Account clone() {
             Account c = (Account) super.clone();
-            c.certificates = certificates.stream().map(a -> (Certificate)a.clone()).collect(toList());
+            c.certificates = cloneMapValues(certificates);
             return c;
         }
     }
@@ -48,12 +53,17 @@ public class AcmeConfig extends Struct {
         public String id;
         public String organization;
         public List<String> hostnames;
+
+        @Override
+        public Certificate clone() {
+            return (Certificate) super.clone();
+        }
     }
 
     @Override
     public AcmeConfig clone() {
         AcmeConfig c = (AcmeConfig) super.clone();
-        c.accounts = accounts.stream().map(a -> (Account)a.clone()).collect(toList());
+        c.accounts = cloneMapValues(accounts);
         return c;
     }
 }

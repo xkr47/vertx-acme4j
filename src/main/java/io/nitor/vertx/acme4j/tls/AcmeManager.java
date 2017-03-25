@@ -15,6 +15,7 @@
  */
 package io.nitor.vertx.acme4j.tls;
 
+import io.nitor.vertx.acme4j.tls.AcmeConfig.Account;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
 import org.apache.logging.log4j.LogManager;
@@ -36,10 +37,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.security.KeyPair;
 import java.security.cert.X509Certificate;
-import java.util.Collection;
-import java.util.Date;
-import java.util.List;
-import java.util.Scanner;
+import java.util.*;
 import java.util.stream.Collectors;
 
 public class AcmeManager {
@@ -59,6 +57,8 @@ public class AcmeManager {
     private final Vertx vertx;
     private final DynamicCertManager dynamicCertManager;
     private final String dbPath;
+    private final AcmeConfigManager configManager = new AcmeConfigManager();
+    private AcmeConfig cur;
 
     public AcmeManager(Vertx vertx, DynamicCertManager dynamicCertManager, String dbPath) {
         this.vertx = vertx;
@@ -66,16 +66,67 @@ public class AcmeManager {
         this.dbPath = dbPath;
     }
 
-    public synchronized void reconfigure(AcmeConfig conf) {
-        conf.validate();
-        conf = conf.clone();
+    class AcmeConfigManager {
+        private final AccountManager accountManager = new AccountManager();
 
+        public void update(AcmeConfig oldC, AcmeConfig nevC) {
+            nevC.validate();
+            mapDiff(oldC.accounts, nevC.accounts, (id, oldA, nevA) -> {
+                if (nevA == null) {
+                    accountManager.remove(oldA);
+                } else if (oldA == null) {
+                    accountManager.create(nevA);
+                } else {
+                    accountManager.update(oldA, nevA);
+                }
+            });
+        }
+    }
+    class AccountManager {
+        private final CertificateManager certificateManager = new CertificateManager();
+
+        public void create(Account nevA) {
+        }
+
+        public void update(Account oldA, Account nevA) {
+        }
+
+        public void remove(Account oldA) {
+            // deregister all certificates for this account; account destruction should be handled in some other way
+            oldA.certificates.keySet().forEach(certificateManager::remove);
+        }
+    }
+
+    class CertificateManager {
+        public void remove(String certificateId) {
+            // deregister certificate; certificate destruction should be handled in some other way
+            dynamicCertManager.remove(certificateId);
+        }
+    }
+
+
+    public synchronized void reconfigure(AcmeConfig conf) {
+        configManager.update(cur, conf);
+        cur = conf.clone();
+        /*
         for (boolean validate : new boolean[] { true, false }) {
             root.getJsonArray("accounts").stream().map(JsonObject.class::cast)
                     .forEach(account ->
                             reconfigureAccount(account, validate)
                     );
         }
+        */
+    }
+
+    private static <K,V> void mapDiff(Map<K,V> old, Map<K,V> nev, MapDiffHandler<K,V> handler) {
+        old.entrySet().forEach(e -> {
+            handler.handle(e.getKey(), e.getValue(), nev.get(e.getKey()));
+        });
+        nev.entrySet().forEach(e -> {
+            if (!old.containsKey(e.getKey())) {
+                handler.handle(e.getKey(), null, e.getValue());
+            }
+        });
     }
 
     private void reconfigureAccount(JsonObject account, boolean validate) {
@@ -328,4 +379,8 @@ public class AcmeManager {
         }
     }
 
+    @FunctionalInterface
+    public interface MapDiffHandler<K, V> {
+        void handle(K key, V old, V nev);
+    }
 }
