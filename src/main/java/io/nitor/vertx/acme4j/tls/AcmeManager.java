@@ -102,8 +102,8 @@ public class AcmeManager {
             }
 
             try {
-                accountKeyPair = getOrCreateAccountKeyPair();
-                session = new Session(new URI(ACME_SERVER_URI), accountKeyPair);
+                if (accountKeyPair == null) accountKeyPair = getOrCreateAccountKeyPair();
+                if session = new Session(new URI(ACME_SERVER_URI), accountKeyPair);
                 logger.info("Session set up");
                 registration = getOrCreateRegistration(session);
             } catch (IOException e) {

@@ -15,14 +15,8 @@
  */
 package io.nitor.vertx.acme4j.tls;
 
-import java.util.AbstractMap;
-import java.util.AbstractMap.SimpleEntry;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
-
-import static java.util.stream.Collectors.toList;
-import static java.util.stream.Collectors.toMap;
 
 public class AcmeConfig extends Struct {
     public Map<String,Account> accounts;
@@ -33,12 +27,17 @@ public class AcmeConfig extends Struct {
     }
 
     public static class Account extends Struct {
-        public String id;
+        public boolean enabled = true;
         public String providerUrl;
         public String acceptedAgreementUrl;
+        public String contactEmail;
         public Map<String, Certificate> certificates;
 
         public void validate() {
+            if (!enabled) return;
+            if (providerUrl == null || providerUrl.isEmpty()) throw new NullPointerException("providerUrl");
+            if (certificates == null) throw new NullPointerException("certificates");
+            certificates.values().stream().forEach(Certificate::validate);
         }
 
         @Override
@@ -50,13 +49,19 @@ public class AcmeConfig extends Struct {
     }
 
     public static class Certificate extends Struct {
-        public String id;
+        public boolean enabled = true;
         public String organization;
         public List<String> hostnames;
 
         @Override
         public Certificate clone() {
             return (Certificate) super.clone();
+        }
+
+        public void validate() {
+            if (!enabled) return;
+            if (organization == null) throw new NullPointerException("organization");
+            if (hostnames == null || hostnames.isEmpty()) throw new NullPointerException("hostnames");
         }
     }
 
