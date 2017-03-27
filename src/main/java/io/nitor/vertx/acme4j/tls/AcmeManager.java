@@ -86,9 +86,6 @@ public class AcmeManager {
     class AccountManager {
         private final Map<String, CertificateManager> certificateManagers = new HashMap<>();
         private final String prefix;
-        KeyPair accountKeyPair;
-        Session session;
-        Registration registration;
 
         public AccountManager(String prefix) {
             this.prefix = prefix;
@@ -102,10 +99,11 @@ public class AcmeManager {
             }
 
             try {
-                if (accountKeyPair == null) accountKeyPair = getOrCreateAccountKeyPair();
-                if session = new Session(new URI(ACME_SERVER_URI), accountKeyPair);
+                KeyPair accountKeyPair = getOrCreateAccountKeyPair();
+                Session session = new Session(new URI(ACME_SERVER_URI), accountKeyPair);
                 logger.info("Session set up");
-                registration = getOrCreateRegistration(session);
+                Registration registration = getOrCreateRegistration(session);
+                registration.update();
             } catch (IOException e) {
                 e.printStackTrace();
             } catch (URISyntaxException e) {
@@ -126,7 +124,7 @@ public class AcmeManager {
                 keyPair = KeyPairUtils.createKeyPair(4096);
                 write(domainKeyPairFile, fw -> KeyPairUtils.writeKeyPair(keyPair, fw));
                 logger.info("New account keypair written to " + domainKeyPairFile);
-<            }
+            }
             return keyPair;
         }
 
@@ -166,6 +164,39 @@ public class AcmeManager {
         public void remove(String certificateId) {
             // deregister certificate; certificate destruction should be handled in some other way
             dynamicCertManager.remove(certificateId);
+        }
+
+        public void update() {
+            Registration registration = null;
+            logger.info("Domains to authorize: {}", DOMAIN_NAMES);
+            for (String domainName : DOMAIN_NAMES) {
+                logger.info("Authorizing domain {}", domainName);
+                Authorization auth;
+                try {
+                    auth = registration.authorizeDomain(domainName);
+                } catch (AcmeUnauthorizedException e) {
+                    if (registration.getAgreement().equals(AGREEMENT_URI)) {
+                        logger.info("Agreeing to " + AGREEMENT_URI);
+                        registration.modify().setAgreement(new URI(AGREEMENT_URI)).commit();
+                        auth = registration.authorizeDomain(domainName);
+                    } else {
+                        throw new RuntimeException("You need to agree to the Subscriber Agreement at: " + registration.getAgreement(), e);
+                    }
+                }
+                logger.info("Domain {} authorized, status {}", domainName, auth.getStatus());
+                if (auth.getStatus() == Status.VALID) continue; // TODO what statuses really?
+                continue;
+                logger.info("Challenge combinations supported: " + auth.getCombinations());
+                Collection<Challenge> combination = auth.findCombination(SUPPORTED_CHALLENGES);
+                logger.info("Challenges to complete: " + combination);
+                for (Challenge challenge : combination) {
+                    executeChallenge(domainName, challenge);
+                }
+                logger.info("Domain {} successfully associated with account", domainName);
+            }
+            logger.info("All domains successfully associated with account");
+            createCertificate(registration, DOMAIN_NAMES, ORGANIZATION);
+            logger.info("Certificate successfully activated. All done.");
         }
 
         private void createCertificate(Registration registration, String[] domainNames, String organization) throws IOException, AcmeException, InterruptedException {
@@ -321,39 +352,6 @@ public class AcmeManager {
             }
         }
     */
-    public void lol() {
-        try {
-            logger.info("Domains to authorize: {}", DOMAIN_NAMES);
-            for (String domainName : DOMAIN_NAMES) {
-                logger.info("Authorizing domain {}", domainName);
-                Authorization auth;
-                try {
-                    auth = registration.authorizeDomain(domainName);
-                } catch (AcmeUnauthorizedException e) {
-                    if (registration.getAgreement().equals(AGREEMENT_URI)) {
-                        logger.info("Agreeing to " + AGREEMENT_URI);
-                        registration.modify().setAgreement(new URI(AGREEMENT_URI)).commit();
-                        auth = registration.authorizeDomain(domainName);
-                    } else {
-                        throw new RuntimeException("You need to agree to the Subscriber Agreement at: " + registration.getAgreement(), e);
-                    }
-                }
-                logger.info("Domain {} authorized", domainName);
-                logger.info("Challenge combinations supported: " + auth.getCombinations());
-                Collection<Challenge> combination = auth.findCombination(SUPPORTED_CHALLENGES);
-                logger.info("Challenges to complete: " + combination);
-                for (Challenge challenge : combination) {
-                    executeChallenge(domainName, challenge);
-                }
-                logger.info("Domain {} successfully associated with account", domainName);
-            }
-            logger.info("All domains successfully associated with account");
-            createCertificate(registration, DOMAIN_NAMES, ORGANIZATION);
-            logger.info("Certificate successfully activated. All done.");
-        } catch (Exception e) {
-            throw new RuntimeException("AcmeManager error", e);
-        }
-    }
 
 
     public interface Read<T> {
