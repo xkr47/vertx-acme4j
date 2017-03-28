@@ -67,26 +67,24 @@ public class AcmeManager {
     }
 
     class AcmeConfigManager {
-        public void update(AcmeConfig oldC, AcmeConfig nevC) {
-            nevC.validate();
-            mapDiff(oldC.accounts, nevC.accounts, (id, oldA, nevA) -> {
-                AccountManager am = new AccountManager();
-                am.update(oldA, nevA);
-            });
+        public void update(AcmeConfig oldC, AcmeConfig newC) {
+            newC.validate();
+            final AccountManager am = new AccountManager();
+            mapDiff(oldC.accounts, newC.accounts, am::update);
         }
     }
 
     class AccountManager {
-        public void update(Account oldA, Account nevA) {
-            CertificateManager cm = new CertificateManager();
-            if (nevA == null) {
+        public void update(String accountId, Account oldA, Account newA) {
+            final CertificateManager cm = new CertificateManager();
+            if (newA == null) {
                 // deregister all certificates for this account; account destruction should be handled in some other way
-                oldA.certificates.keySet().forEach(cm::remove);
+                oldA.certificates.entrySet().forEach(e -> cm.update(null, accountId, e.getKey(), e.getValue(), null));
                 return;
             }
 
             try {
-                KeyPair accountKeyPair = getOrCreateAccountKeyPair();
+                KeyPair accountKeyPair = getOrCreateAccountKeyPair(accountId);
                 Session session = new Session(new URI(ACME_SERVER_URI), accountKeyPair);
                 logger.info("Session set up");
                 Registration registration = getOrCreateRegistration(session);
@@ -100,9 +98,9 @@ public class AcmeManager {
             }
         }
 
-        private KeyPair getOrCreateAccountKeyPair() throws IOException {
+        private KeyPair getOrCreateAccountKeyPair(String accountId) throws IOException {
             KeyPair keyPair;
-            String domainKeyPairFile = prefix + DOMAIN_KEY_PAIR_FILE;
+            String domainKeyPairFile = accountId + "-" + DOMAIN_KEY_PAIR_FILE;
             if (new File(domainKeyPairFile).exists()) {
                 keyPair = read(domainKeyPairFile, fr -> KeyPairUtils.readKeyPair(fr));
                 logger.info("Existing account keypair read from " + domainKeyPairFile);
@@ -148,12 +146,11 @@ public class AcmeManager {
     }
 
     class CertificateManager {
-        public void remove(String certificateId) {
-            // deregister certificate; certificate destruction should be handled in some other way
-            dynamicCertManager.remove(certificateId);
-        }
-
-        public void update(Registration registration) throws AcmeException, IOException, InterruptedException {
+        public void update(Registration registration, String id, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) throws AcmeException, IOException, InterruptedException {
+            if (newC == null) {
+                // deregister certificate; certificate destruction should be handled in some other way
+                dynamicCertManager.remove(certificateId);
+            }
             logger.info("Domains to authorize: {}", DOMAIN_NAMES);
             for (String domainName : DOMAIN_NAMES) {
                 logger.info("Authorizing domain {}", domainName);

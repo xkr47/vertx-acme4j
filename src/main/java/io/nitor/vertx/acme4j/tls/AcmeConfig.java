@@ -25,15 +25,22 @@ public class AcmeConfig extends Struct {
     public void validate() {
         if (accounts == null) throw new NullPointerException();
         accounts.values().stream().forEach(Account::validate);
-        List<String> hostNames = accounts.values()
+        List<String> duplicateHostNames = accounts.values()
                 .stream()
                 .filter(a -> a.enabled)
                 .flatMap(a -> a.certificates.values()
                         .stream()
                         .filter(c -> c.enabled)
                         .flatMap(c -> c.hostnames.stream()))
-                .collect
-                
+                .collect(Collectors.groupingBy(s -> s))
+                .values()
+                .stream()
+                .filter(l -> l.size() > 1)
+                .map(l -> l.iterator().next())
+                .collect(Collectors.toList());
+        if (!duplicateHostNames.isEmpty()) {
+            throw new IllegalArgumentException("Duplicate hostnames found among accounts and certificates: " + duplicateHostNames);
+        }
     }
 
     public static class Account extends Struct {
