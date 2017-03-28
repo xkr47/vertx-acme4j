@@ -17,6 +17,7 @@ package io.nitor.vertx.acme4j.tls;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 public class AcmeConfig extends Struct {
     public Map<String,Account> accounts;
@@ -24,6 +25,15 @@ public class AcmeConfig extends Struct {
     public void validate() {
         if (accounts == null) throw new NullPointerException();
         accounts.values().stream().forEach(Account::validate);
+        List<String> hostNames = accounts.values()
+                .stream()
+                .filter(a -> a.enabled)
+                .flatMap(a -> a.certificates.values()
+                        .stream()
+                        .filter(c -> c.enabled)
+                        .flatMap(c -> c.hostnames.stream()))
+                .collect
+                
     }
 
     public static class Account extends Struct {

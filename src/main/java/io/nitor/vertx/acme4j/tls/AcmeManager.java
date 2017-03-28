@@ -67,34 +67,21 @@ public class AcmeManager {
     }
 
     class AcmeConfigManager {
-        private final Map<String, AccountManager> accountManagers = new HashMap<>();
-
         public void update(AcmeConfig oldC, AcmeConfig nevC) {
             nevC.validate();
             mapDiff(oldC.accounts, nevC.accounts, (id, oldA, nevA) -> {
-                AccountManager m;
-                if (oldA == null) {
-                    accountManagers.put(id, m = new AccountManager(dbPath + '/' + id + '.'));
-                } else {
-                    m = nevA == null ? accountManagers.remove(id) : accountManagers.get(id);
-                }
-                m.update(oldA, nevA);
+                AccountManager am = new AccountManager();
+                am.update(oldA, nevA);
             });
         }
     }
 
     class AccountManager {
-        private final Map<String, CertificateManager> certificateManagers = new HashMap<>();
-        private final String prefix;
-
-        public AccountManager(String prefix) {
-            this.prefix = prefix;
-        }
-
         public void update(Account oldA, Account nevA) {
+            CertificateManager cm = new CertificateManager();
             if (nevA == null) {
                 // deregister all certificates for this account; account destruction should be handled in some other way
-                oldA.certificates.keySet().forEach(certificateManager::remove);
+                oldA.certificates.keySet().forEach(cm::remove);
                 return;
             }
 
@@ -166,8 +153,7 @@ public class AcmeManager {
             dynamicCertManager.remove(certificateId);
         }
 
-        public void update() {
-            Registration registration = null;
+        public void update(Registration registration) throws AcmeException, IOException, InterruptedException {
             logger.info("Domains to authorize: {}", DOMAIN_NAMES);
             for (String domainName : DOMAIN_NAMES) {
                 logger.info("Authorizing domain {}", domainName);
