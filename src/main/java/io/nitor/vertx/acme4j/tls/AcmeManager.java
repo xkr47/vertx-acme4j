@@ -35,22 +35,24 @@ import org.shredzone.acme4j.util.KeyPairUtils;
 import java.io.*;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URLEncoder;
 import java.security.KeyPair;
 import java.security.cert.X509Certificate;
 import java.util.*;
+import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
 public class AcmeManager {
 
-    static final String DOMAIN_KEY_PAIR_FILE = "letsencrypt-keypair.pem";
-    static final String DOMAIN_ACCOUNT_LOCATION_FILE = "letsencrypt-accountLocation.txt";
-    static final String CONTACT_EMAIL = null;
-    static final String[] DOMAIN_NAMES = {"a139189489518.example.org"};
-    static final String ORGANIZATION = "The Example Organization";
+    static final String DOMAIN_KEY_PAIR_FILE = "keypair.pem";
+    static final String DOMAIN_ACCOUNT_LOCATION_FILE = "accountLocation.txt";
+    //static final String CONTACT_EMAIL = null;
+    //static final String[] DOMAIN_NAMES = {"a139189489518.example.org"};
+    //static final String ORGANIZATION = "The Example Organization";
 
-    static final String ACME_SERVER_URI = "acme://letsencrypt.org/staging";
+    //static final String ACME_SERVER_URI = "acme://letsencrypt.org/staging";
 
-    static final String AGREEMENT_URI = "https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf";
+    // static final String AGREEMENT_URI = "https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf";
 
     private static Logger logger = LogManager.getLogger(AcmeManager.class);
 
@@ -63,32 +65,39 @@ public class AcmeManager {
     public AcmeManager(Vertx vertx, DynamicCertManager dynamicCertManager, String dbPath) {
         this.vertx = vertx;
         this.dynamicCertManager = dynamicCertManager;
-        this.dbPath = dbPath;
+        this.dbPath = dbPath.endsWith("/") ? dbPath : dbPath + '/';
     }
 
     class AcmeConfigManager {
         public void update(AcmeConfig oldC, AcmeConfig newC) {
             newC.validate();
             final AccountManager am = new AccountManager();
-            mapDiff(oldC.accounts, newC.accounts, am::update);
+            mapDiff(oldC.accounts, newC.accounts, (accountId, oldA, newA) -> eh(()-> am.update(accountId, oldA, newA), "account " + accountId));
         }
     }
 
     class AccountManager {
         public void update(String accountId, Account oldA, Account newA) {
             final CertificateManager cm = new CertificateManager();
-            if (newA == null) {
+            String oldAccountDbId = accountDbIdFor(accountId, oldA);
+            String newAccountDbId = accountDbIdFor(accountId, newA);
+            if (newA == null || !newAccountDbId.equals(oldAccountDbId)) {
                 // deregister all certificates for this account; account destruction should be handled in some other way
-                oldA.certificates.entrySet().forEach(e -> cm.update(null, accountId, e.getKey(), e.getValue(), null));
-                return;
+                oldA.certificates.entrySet().forEach(e -> eh(() -> cm.update(null, accountId, e.getKey(), e.getValue(), null), "certificate " + e.getKey()));
+                if (newA == null) {
+                    return;
+                }
+                oldA = null;
             }
 
             try {
-                KeyPair accountKeyPair = getOrCreateAccountKeyPair(accountId);
-                Session session = new Session(new URI(ACME_SERVER_URI), accountKeyPair);
+                KeyPair accountKeyPair = getOrCreateAccountKeyPair(newAccountDbId);
+                Session session = new Session(new URI(newA.providerUrl), accountKeyPair);
                 logger.info("Session set up");
-                Registration registration = getOrCreateRegistration(session);
+                Registration registration = getOrCreateRegistration(newAccountDbId, newA, session);
                 registration.update();
+
+                mapDiff(oldA.certificates, newA.certificates, (certificateId, oldC, newC) -> eh(()-> cm.update(registration, newAccountDbId, certificateId, oldC, newC), "certificate " + certificateId));
             } catch (IOException e) {
                 e.printStackTrace();
             } catch (URISyntaxException e) {
@@ -98,9 +107,17 @@ public class AcmeManager {
             }
         }
 
-        private KeyPair getOrCreateAccountKeyPair(String accountId) throws IOException {
+        private String accountDbIdFor(String accountId, Account account) {
+            try {
+                return account == null ? null : accountId + '-' + URLEncoder.encode(account.providerUrl, "UTF-8");
+            } catch (UnsupportedEncodingException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        private KeyPair getOrCreateAccountKeyPair(String accountDbId) throws IOException {
             KeyPair keyPair;
-            String domainKeyPairFile = accountId + "-" + DOMAIN_KEY_PAIR_FILE;
+            String domainKeyPairFile = dbPath + accountDbId + '-' + DOMAIN_KEY_PAIR_FILE;
             if (new File(domainKeyPairFile).exists()) {
                 keyPair = read(domainKeyPairFile, fr -> KeyPairUtils.readKeyPair(fr));
                 logger.info("Existing account keypair read from " + domainKeyPairFile);
@@ -113,10 +130,10 @@ public class AcmeManager {
             return keyPair;
         }
 
-        private Registration getOrCreateRegistration(Session session) throws AcmeException, IOException, URISyntaxException {
+        private Registration getOrCreateRegistration(String accountDbId, Account account, Session session) throws AcmeException, IOException, URISyntaxException {
             // TODO update registration when agreement, contact or others change (save to file what were last used values)
             Registration registration;
-            String domainAccountLocationFile = prefix + DOMAIN_ACCOUNT_LOCATION_FILE;
+            String domainAccountLocationFile = dbPath + accountDbId + '-' + DOMAIN_ACCOUNT_LOCATION_FILE;
             if (new File(domainAccountLocationFile).exists()) {
                 logger.info("Domain account location file " + domainAccountLocationFile + " exists, using..");
                 URI location = new URI(read(domainAccountLocationFile, r -> r.readLine()));
@@ -126,8 +143,8 @@ public class AcmeManager {
             } else {
                 logger.info("No domain account location file, attempting to create new registration");
                 RegistrationBuilder builder = new RegistrationBuilder();
-                if (CONTACT_EMAIL != null) {
-                    builder.addContact("mailto:" + CONTACT_EMAIL);
+                if (account.contactEmail != null) {
+                    builder.addContact("mailto:" + account.contactEmail);
                 }
                 try {
                     registration = builder.create(session);
@@ -381,5 +398,18 @@ public class AcmeManager {
     @FunctionalInterface
     public interface MapDiffHandler<K, V> {
         void handle(K key, V old, V nev);
+    }
+
+    @FunctionalInterface
+    public interface CheckedProcedure {
+        void call() throws Exception;
+    }
+
+    static void eh(CheckedProcedure c, String idDescription) {
+        try {
+            c.call();
+        } catch (Exception e) {
+            throw new RuntimeException("While handling " + idDescription, e);
+        }
     }
 }
