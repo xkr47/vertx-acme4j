@@ -146,7 +146,7 @@ public class AcmeManager {
     }
 
     class CertificateManager {
-        public void update(Registration registration, String id, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) throws AcmeException, IOException, InterruptedException {
+        public void update(Registration registration, String accountId, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) throws AcmeException, IOException, InterruptedException {
             if (newC == null) {
                 // deregister certificate; certificate destruction should be handled in some other way
                 dynamicCertManager.remove(certificateId);
