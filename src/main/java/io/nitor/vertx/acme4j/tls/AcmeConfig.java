@@ -47,7 +47,7 @@ public class AcmeConfig extends Struct {
         public boolean enabled = true;
         public String providerUrl;
         public String acceptedAgreementUrl;
-        public String contactEmail;
+        public String[] contactURIs;
         public Map<String, Certificate> certificates;
 
         public void validate() {

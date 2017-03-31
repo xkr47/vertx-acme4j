@@ -42,6 +42,8 @@ import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
+import static java.util.Arrays.asList;
+
 public class AcmeManager {
 
     static final String DOMAIN_KEY_PAIR_FILE = "keypair.pem";
@@ -92,7 +94,7 @@ public class AcmeManager {
 
             try {
                 KeyPair accountKeyPair = getOrCreateAccountKeyPair(newAccountDbId);
-                Session session = new Session(new URI(newA.providerUrl), accountKeyPair);
+                Session session = new Session(toURI(newA.providerUrl), accountKeyPair);
                 logger.info("Session set up");
                 Registration registration = getOrCreateRegistration(newAccountDbId, newA, session);
                 registration.update();
@@ -134,6 +136,8 @@ public class AcmeManager {
             // TODO update registration when agreement, contact or others change (save to file what were last used values)
             Registration registration;
             String domainAccountLocationFile = dbPath + accountDbId + '-' + DOMAIN_ACCOUNT_LOCATION_FILE;
+            boolean created = false;
+            String[] contactURIs = account.contactURIs == null ? new String[0] : account.contactURIs;
             if (new File(domainAccountLocationFile).exists()) {
                 logger.info("Domain account location file " + domainAccountLocationFile + " exists, using..");
                 URI location = new URI(read(domainAccountLocationFile, r -> r.readLine()));
@@ -143,11 +147,12 @@ public class AcmeManager {
             } else {
                 logger.info("No domain account location file, attempting to create new registration");
                 RegistrationBuilder builder = new RegistrationBuilder();
-                if (account.contactEmail != null) {
-                    builder.addContact("mailto:" + account.contactEmail);
+                for (String uri : contactURIs) {
+                    builder.addContact(uri);
                 }
                 try {
                     registration = builder.create(session);
+                    created = true;
                     logger.info("Registration successfully created");
                 } catch (AcmeConflictException e) {
                     logger.info("Registration existed, using provided location: " + e.getLocation());
@@ -158,7 +163,28 @@ public class AcmeManager {
                 write(domainAccountLocationFile, w -> w.write(finalRegistration.getLocation().toASCIIString()));
                 logger.info("Domain account location file " + domainAccountLocationFile + " saved");
             }
+
+            boolean contactsChanged = !created && !registration.getContacts().equals(asList(account.contactURIs).stream().map(this::toURI).collect(Collectors.toList()));
+            boolean agreementChanged = created || !registration.getAgreement().equals(toURI(account.acceptedAgreementUrl));
+            if (contactsChanged || agreementChanged) {
+                Registration.EditableRegistration editableRegistration = registration.modify();
+                List<URI> editableContacts = editableRegistration.getContacts();
+                editableContacts.clear();
+                for (String uri : contactURIs) {
+                    editableContacts.add(toURI(uri));
+                }
+                editableRegistration.setAgreement(toURI(account.acceptedAgreementUrl));
+                editableRegistration.commit();
+            }
             return registration;
+        }
+
+        private URI toURI(String uri)  {
+            try {
+                return new URI(uri);
+            } catch (URISyntaxException e) {
+                throw new IllegalArgumentException("Bad URI: " + uri, e);
+            }
         }
     }
 
