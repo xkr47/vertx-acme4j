@@ -23,6 +23,7 @@ import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
 import org.shredzone.acme4j.*;
 import org.shredzone.acme4j.challenge.Challenge;
 import org.shredzone.acme4j.challenge.TlsSni01Challenge;
@@ -40,6 +41,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.security.KeyPair;
+import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
 import java.util.*;
 
@@ -201,14 +203,22 @@ public class AcmeManager {
                 dynamicCertManager.remove(certificateId);
             }
 
-            // TODO load pre-existing certs
+            String privateKeyFile = dbPath + accountDbId + "-" + certificateId + "-key.pem";
+            String certificateFile = dbPath + accountDbId + "-" + certificateId + "-certchain.pem";
 
-            logger.info("Domains to authorize: {}", DOMAIN_NAMES);
-            for (String domainName : DOMAIN_NAMES) {
+            if (vertx.fileSystem().existsBlocking(certificateFile) && vertx.fileSystem().existsBlocking(privateKeyFile)) {
+                X509Certificate[] certChain = PemLoader.loadCerts(vertx.fileSystem().readFileBlocking(certificateFile));
+                PrivateKey privateKey = PemLoader.loadPrivateKey(vertx.fileSystem().readFileBlocking(privateKeyFile));
+                // TODO
+            }
+
+            logger.info("Domains to authorize: {}", newC.hostnames);
+            for (String domainName : newC.hostnames) {
                 logger.info("Authorizing domain {}", domainName);
                 Authorization auth;
-                try {
+                //try {
                     auth = registration.authorizeDomain(domainName);
+                    /*
                 } catch (AcmeUnauthorizedException e) {
                     if (registration.getAgreement().equals(AGREEMENT_URI)) {
                         logger.info("Agreeing to " + AGREEMENT_URI);
@@ -218,6 +228,7 @@ public class AcmeManager {
                         throw new RuntimeException("You need to agree to the Subscriber Agreement at: " + registration.getAgreement(), e);
                     }
                 }
+                */
                 logger.info("Domain {} authorized, status {}", domainName, auth.getStatus());
                 if (auth.getStatus() == Status.VALID) continue; // TODO what statuses really?
                 continue;
@@ -230,13 +241,21 @@ public class AcmeManager {
                 logger.info("Domain {} successfully associated with account", domainName);
             }
             logger.info("All domains successfully associated with account");
-            createCertificate(registration, DOMAIN_NAMES, ORGANIZATION);
+            createCertificate(registration, accountDbId, certificateId, privateKeyFile, certificateFile, newC.hostnames, newC.organization);
             logger.info("Certificate successfully activated. All done.");
         }
 
-        private void createCertificate(Registration registration, String[] domainNames, String organization) throws IOException, AcmeException, InterruptedException {
+
+        public void writePrivateKey(PrivateKey key, Writer w) throws IOException {
+            try (JcaPEMWriter jw = new JcaPEMWriter(w)) {
+                jw.writeObject(key);
+            }
+        }
+
+        private void createCertificate(Registration registration, String accountDbId, String certificateId, String privateKeyFile, String certificateFile, List<String> domainNames, String organization) throws IOException, AcmeException, InterruptedException {
             logger.info("Creating private key");
             KeyPair domainKeyPair = KeyPairUtils.createKeyPair(4096);
+            write(privateKeyFile, w -> writePrivateKey(domainKeyPair.getPrivate(), w));
 
             logger.info("Creating certificate request (CSR)");
             CSRBuilder csrb = new CSRBuilder();
@@ -248,7 +267,7 @@ public class AcmeManager {
             byte[] csr = csrb.getEncoded();
 
             logger.info("Saving certificate request for renewal purposes");
-            try (FileWriter fw = new FileWriter("letsencrypt-" + domainNames[0] + "-cert-request.csr")) {
+            try (FileWriter fw = new FileWriter(dbPath + accountDbId + "-" + certificateId + "-cert-request.csr")) {
                 csrb.write(fw);
             }
 
@@ -260,12 +279,12 @@ public class AcmeManager {
             X509Certificate[] chain = fetchWithRetry(() -> certificate.downloadChain());
 
             logger.info("Saving certificate chain");
-            try (FileWriter fw = new FileWriter("letsencrypt-" + domainNames[0] + "-cert-chain.crt")) {
+            try (FileWriter fw = new FileWriter(certificateFile)) {
                 CertificateUtils.writeX509CertificateChain(fw, cert, chain);
             }
 
             logger.info("Installing certificate");
-            dynamicCertManager.put("letsencrypt-cert-" + domainNames[0], domainKeyPair.getPrivate(), cert, chain);
+            dynamicCertManager.put("letsencrypt-cert-" + certificateId, domainKeyPair.getPrivate(), cert, chain);
         }
 
         private static final String[] SUPPORTED_CHALLENGES = {
