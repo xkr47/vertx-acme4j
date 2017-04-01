@@ -15,9 +15,12 @@
  */
 package io.nitor.vertx.acme4j.tls;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nitor.vertx.acme4j.tls.AcmeConfig.Account;
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
-import io.vertx.core.json.JsonObject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.shredzone.acme4j.*;
@@ -39,15 +42,12 @@ import java.net.URLEncoder;
 import java.security.KeyPair;
 import java.security.cert.X509Certificate;
 import java.util.*;
-import java.util.concurrent.Callable;
-import java.util.stream.Collectors;
-
-import static java.util.Arrays.asList;
 
 public class AcmeManager {
 
     static final String DOMAIN_KEY_PAIR_FILE = "keypair.pem";
     static final String DOMAIN_ACCOUNT_LOCATION_FILE = "accountLocation.txt";
+    static final String ACTIVE_CONF_PATH = "active.json";
     //static final String CONTACT_EMAIL = null;
     //static final String[] DOMAIN_NAMES = {"a139189489518.example.org"};
     //static final String ORGANIZATION = "The Example Organization";
@@ -74,7 +74,8 @@ public class AcmeManager {
         public void update(AcmeConfig oldC, AcmeConfig newC) {
             newC.validate();
             final AccountManager am = new AccountManager();
-            mapDiff(oldC.accounts, newC.accounts, (accountId, oldA, newA) -> eh(()-> am.update(accountId, oldA, newA), "account " + accountId));
+            mapDiff(oldC == null ? new HashMap<>() : oldC.accounts, newC.accounts,
+                    (accountId, oldA, newA) -> eh(()-> am.update(accountId, oldA, newA), "account " + accountId));
         }
     }
 
@@ -94,12 +95,19 @@ public class AcmeManager {
 
             try {
                 KeyPair accountKeyPair = getOrCreateAccountKeyPair(newAccountDbId);
-                Session session = new Session(toURI(newA.providerUrl), accountKeyPair);
+                Session session = new Session(new URI(newA.providerUrl), accountKeyPair);
                 logger.info("Session set up");
                 Registration registration = getOrCreateRegistration(newAccountDbId, newA, session);
-                registration.update();
 
-                mapDiff(oldA.certificates, newA.certificates, (certificateId, oldC, newC) -> eh(()-> cm.update(registration, newAccountDbId, certificateId, oldC, newC), "certificate " + certificateId));
+                try {
+                    updateCerts(registration, newAccountDbId, cm, oldA, newA);
+                } catch (RuntimeException e) {
+                    if (!(e.getCause() instanceof AcmeUnauthorizedException)) {
+                        throw e;
+                    }
+
+                    updateCerts(registration, newAccountDbId, cm, oldA, newA);
+                }
             } catch (IOException e) {
                 e.printStackTrace();
             } catch (URISyntaxException e) {
@@ -107,6 +115,11 @@ public class AcmeManager {
             } catch (AcmeException e) {
                 e.printStackTrace();
             }
+        }
+
+        private void updateCerts(Registration registration, String newAccountDbId, CertificateManager cm, Account oldA, Account newA) {
+            mapDiff(oldA == null ? new HashMap<>() : oldA.certificates, newA.certificates,
+                    (certificateId, oldC, newC) -> eh(() -> cm.update(registration, newAccountDbId, certificateId, oldC, newC), "certificate " + certificateId));
         }
 
         private String accountDbIdFor(String accountId, Account account) {
@@ -163,7 +176,7 @@ public class AcmeManager {
                 write(domainAccountLocationFile, w -> w.write(finalRegistration.getLocation().toASCIIString()));
                 logger.info("Domain account location file " + domainAccountLocationFile + " saved");
             }
-
+            /*
             boolean contactsChanged = !created && !registration.getContacts().equals(asList(account.contactURIs).stream().map(this::toURI).collect(Collectors.toList()));
             boolean agreementChanged = created || !registration.getAgreement().equals(toURI(account.acceptedAgreementUrl));
             if (contactsChanged || agreementChanged) {
@@ -176,24 +189,20 @@ public class AcmeManager {
                 editableRegistration.setAgreement(toURI(account.acceptedAgreementUrl));
                 editableRegistration.commit();
             }
+            */
             return registration;
-        }
-
-        private URI toURI(String uri)  {
-            try {
-                return new URI(uri);
-            } catch (URISyntaxException e) {
-                throw new IllegalArgumentException("Bad URI: " + uri, e);
-            }
         }
     }
 
     class CertificateManager {
-        public void update(Registration registration, String accountId, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) throws AcmeException, IOException, InterruptedException {
+        public void update(Registration registration, String accountDbId, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) throws AcmeException, IOException, InterruptedException {
             if (newC == null) {
                 // deregister certificate; certificate destruction should be handled in some other way
                 dynamicCertManager.remove(certificateId);
             }
+
+            // TODO load pre-existing certs
+
             logger.info("Domains to authorize: {}", DOMAIN_NAMES);
             for (String domainName : DOMAIN_NAMES) {
                 logger.info("Authorizing domain {}", domainName);
@@ -314,7 +323,35 @@ public class AcmeManager {
         }
     }
 
+    private String activeConfigPath() {
+        return dbPath + ACTIVE_CONF_PATH;
+    }
+
+    public void start(Handler<AsyncResult<Void>> startArh) {
+        vertx.fileSystem().readFile(activeConfigPath(), fileAr -> {
+            if (fileAr.failed()) {
+                startArh.handle(Future.failedFuture(fileAr.cause()));
+                return;
+            }
+            ObjectMapper objectMapper = new ObjectMapper();
+            try {
+                startWithConfig(objectMapper.readValue(fileAr.result().getBytes(), AcmeConfig.class), startArh);
+            } catch (IOException e) {
+                startArh.handle(Future.failedFuture(e));
+            }
+        });
+    }
+
+    private synchronized void startWithConfig(AcmeConfig conf, Handler<AsyncResult<Void>> startArh) {
+        configManager.update(null, conf);
+        cur = conf;
+        startArh.handle(Future.succeededFuture());
+    }
+
     public synchronized void reconfigure(AcmeConfig conf) {
+        if (cur == null) {
+            throw new IllegalStateException("Not completed startup yet. Forgot to call start()?");
+        }
         configManager.update(cur, conf);
         cur = conf.clone();
         /*
