@@ -42,13 +42,10 @@ public class AsyncKeyPairUtils {
     public static Future<KeyPair> readKeyPair(Vertx vertx, Buffer buf) {
         Future res = Future.future();
         vertx.executeBlocking(fut -> {
-            try (PEMParser parser = new PEMParser(new StringReader(buf.toString()))) {
-                PEMKeyPair keyPair = (PEMKeyPair) parser.readObject();
-                new JcaPEMKeyConverter().getKeyPair(keyPair);
-            } catch (PEMException ex) {
-                fut.fail(new IOException("Invalid PEM file", ex));
-            } catch (IOException ex) {
-                fut.fail(ex);
+            try {
+                fut.complete(KeyPairUtils.readKeyPair(new StringReader(buf.toString())));
+            } catch (IOException e) {
+                fut.fail(e);
             }
         }, res);
         return res;

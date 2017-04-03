@@ -98,7 +98,7 @@ public class AcmeManager {
             }
 
             try {
-                KeyPair accountKeyPair = null; getOrCreateAccountKeyPair(newAccountDbId); // TODO
+                KeyPair accountKeyPair = getOrCreateAccountKeyPair(newAccountDbId); // TODO
                 Session session = new Session(new URI(newA.providerUrl), accountKeyPair);
                 logger.info("Session set up");
                 Registration registration = getOrCreateRegistration(newAccountDbId, newA, session);
@@ -137,18 +137,18 @@ public class AcmeManager {
         private Future<KeyPair> getOrCreateAccountKeyPair(String accountDbId) throws IOException {
             final String domainKeyPairFile = dbPath + accountDbId + '-' + DOMAIN_KEY_PAIR_FILE;
             final Future<KeyPair> res = Future.future();
-            vertx.fileSystem().exists(domainKeyPairFile, (AsyncResult<Boolean> ar) -> {
-                if (ar.failed()) {
+            vertx.fileSystem().exists(domainKeyPairFile, (AsyncResult<Boolean> keyFileExists) -> {
+                if (keyFileExists.failed()) {
                     // file check failed
-                    res.fail(ar.cause());
-                } else if (ar.result()) {
+                    res.fail(keyFileExists.cause());
+                } else if (keyFileExists.result()) {
                     // file exists
-                    vertx.fileSystem().readFile(domainKeyPairFile, ar2 -> {
-                        if (ar2.failed()) {
-                            res.fail(ar2.cause());
+                    vertx.fileSystem().readFile(domainKeyPairFile, existingKeyFile -> {
+                        if (existingKeyFile.failed()) {
+                            res.fail(existingKeyFile.cause());
                             return;
                         }
-                        Future<KeyPair> keyPair = AsyncKeyPairUtils.readKeyPair(vertx, ar2.result());
+                        Future<KeyPair> keyPair = AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile.result());
                         keyPair.setHandler(res);
                     });
                     logger.info("Existing account keypair read from " + domainKeyPairFile);
@@ -158,12 +158,12 @@ public class AcmeManager {
                     //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
                     keyPairFut.compose((keyPair) -> {
                         Future<KeyPair> resfut = Future.future();
-                        AsyncKeyPairUtils.writeKeyPair(vertx, keyPair).setHandler(ar4 -> {
-                            if (ar4.failed()) {
-                                resfut.fail(ar4.cause());
+                        AsyncKeyPairUtils.writeKeyPair(vertx, keyPair).setHandler(keyPairSerialized -> {
+                            if (keyPairSerialized.failed()) {
+                                resfut.fail(keyPairSerialized.cause());
                                 return;
                             }
-                            vertx.fileSystem().writeFile(domainKeyPairFile, ar4.result(), ar3 -> {
+                            vertx.fileSystem().writeFile(domainKeyPairFile, keyPairSerialized.result(), ar3 -> {
                                 if (ar3.failed()) {
                                     resfut.fail(ar3.cause());
                                     return;
