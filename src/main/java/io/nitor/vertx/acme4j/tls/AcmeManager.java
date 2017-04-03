@@ -19,7 +19,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
 import io.nitor.vertx.acme4j.tls.AcmeConfig.Account;
 import io.vertx.core.AsyncResult;
-import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import org.apache.logging.log4j.LogManager;
@@ -45,6 +44,7 @@ import java.security.KeyPair;
 import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
 import java.util.*;
+import java.util.function.Consumer;
 
 import static io.vertx.core.Future.failedFuture;
 import static io.vertx.core.Future.succeededFuture;
@@ -100,9 +100,14 @@ public class AcmeManager {
                 oldA = null;
             }
 
-            try {
-                KeyPair accountKeyPair = getOrCreateAccountKeyPair(newAccountDbId); // TODO
-                Session session = new Session(new URI(newA.providerUrl), accountKeyPair);
+            getOrCreateAccountKeyPair(newAccountDbId, accountKeyPair -> {
+                Session session;
+                try {
+                    session = new Session(new URI(newA.providerUrl), accountKeyPair.result());
+                } catch (URISyntaxException e) {
+                    e.printStackTrace();
+                    return;
+                }
                 logger.info("Session set up");
                 Registration registration = getOrCreateRegistration(newAccountDbId, newA, session);
 
@@ -115,13 +120,7 @@ public class AcmeManager {
 
                     updateCerts(registration, newAccountDbId, cm, oldA, newA);
                 }
-            } catch (IOException e) {
-                e.printStackTrace();
-            } catch (URISyntaxException e) {
-                e.printStackTrace();
-            } catch (AcmeException e) {
-                e.printStackTrace();
-            }
+            });
         }
 
         private void updateCerts(Registration registration, String newAccountDbId, CertificateManager cm, Account oldA, Account newA) {
@@ -137,48 +136,52 @@ public class AcmeManager {
             }
         }
 
-        private void getOrCreateAccountKeyPair(String accountDbId, Handler<AsyncResult<KeyPair>> handler) throws IOException {
-            final String domainKeyPairFile = dbPath + accountDbId + '-' + DOMAIN_KEY_PAIR_FILE;
-            vertx.fileSystem().exists(domainKeyPairFile, (AsyncResult<Boolean> keyFileExists) -> {
+        private void getOrCreateAccountKeyPair(String accountDbId, Handler<AsyncResult<KeyPair>> doneHandler) {
+            String domainKeyPairFile = dbPath + accountDbId + '-' + DOMAIN_KEY_PAIR_FILE;
+            getOrCreateKeyPair(domainKeyPairFile, doneHandler, createHandler -> AsyncKeyPairUtils.createKeyPair(vertx, 4096, createHandler));
+        }
+
+        private void getOrCreateKeyPair(final String keyPairFile, final Handler<AsyncResult<KeyPair>> doneHandler, final Consumer<Handler<AsyncResult<KeyPair>>> creator) {
+            vertx.fileSystem().exists(keyPairFile, (AsyncResult<Boolean> keyFileExists) -> {
                 if (keyFileExists.failed()) {
                     // file check failed
-                    handler.handle(failedFuture(keyFileExists.cause()));
+                    doneHandler.handle(failedFuture(keyFileExists.cause()));
                     return;
                 }
                 if (keyFileExists.result()) {
                     // file exists
-                    vertx.fileSystem().readFile(domainKeyPairFile, existingKeyFile -> {
+                    vertx.fileSystem().readFile(keyPairFile, existingKeyFile -> {
                         if (existingKeyFile.failed()) {
-                            handler.handle(failedFuture(existingKeyFile.cause()));
+                            doneHandler.handle(failedFuture(existingKeyFile.cause()));
                             return;
                         }
                         AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile.result(), readKeyPair -> {
                             if (readKeyPair.succeeded()) {
-                                logger.info("Existing account keypair read from " + domainKeyPairFile);
+                                logger.info("Existing account keypair read from " + keyPairFile);
                             }
-                            handler.handle(readKeyPair);
+                            doneHandler.handle(readKeyPair);
                         });
                     });
                 } else {
                     // file doesn't exist
-                    AsyncKeyPairUtils.createKeyPair(vertx, 4096, createdKeyPair -> {
+                    creator.accept(createdKeyPair -> {
                     //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
                         if (createdKeyPair.failed()) {
-                            handler.handle(failedFuture(createdKeyPair.cause()));
+                            doneHandler.handle(failedFuture(createdKeyPair.cause()));
                             return;
                         }
                         AsyncKeyPairUtils.writeKeyPair(vertx, createdKeyPair.result(), keyPairSerialized -> {
                             if (keyPairSerialized.failed()) {
-                                handler.handle(failedFuture(keyPairSerialized.cause()));
+                                doneHandler.handle(failedFuture(keyPairSerialized.cause()));
                                 return;
                             }
-                            vertx.fileSystem().writeFile(domainKeyPairFile, keyPairSerialized.result(), ar3 -> {
+                            vertx.fileSystem().writeFile(keyPairFile, keyPairSerialized.result(), ar3 -> {
                                 if (ar3.failed()) {
-                                    handler.handle(failedFuture(ar3.cause()));
+                                    doneHandler.handle(failedFuture(ar3.cause()));
                                     return;
                                 }
-                                logger.info("New account keypair written to " + domainKeyPairFile);
-                                handler.handle(succeededFuture(createdKeyPair.result()));
+                                logger.info("New account keypair written to " + keyPairFile);
+                                doneHandler.handle(succeededFuture(createdKeyPair.result()));
                             });
                         });
                     });
