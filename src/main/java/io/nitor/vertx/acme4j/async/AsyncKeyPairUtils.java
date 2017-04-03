@@ -16,15 +16,9 @@
 package io.nitor.vertx.acme4j.async;
 
 import io.vertx.core.AsyncResult;
-import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
-import org.bouncycastle.openssl.PEMException;
-import org.bouncycastle.openssl.PEMKeyPair;
-import org.bouncycastle.openssl.PEMParser;
-import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
-import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
 import org.shredzone.acme4j.util.KeyPairUtils;
 
 import java.io.IOException;
@@ -49,16 +43,15 @@ public class AsyncKeyPairUtils {
         }, handler);
     }
 
-    public static void writeKeyPair(Vertx vertx, KeyPair keypair, Handler<AsyncResult<Buffer>> handler) {
+    public static void writeKeyPair(Vertx vertx, KeyPair keyPair, Handler<AsyncResult<Buffer>> handler) {
         vertx.executeBlocking(fut -> {
-            StringWriter sw = new StringWriter();
-            try (JcaPEMWriter jw = new JcaPEMWriter(sw)) {
-                jw.writeObject(keypair);
+            try {
+                StringWriter sw = new StringWriter();
+                KeyPairUtils.writeKeyPair(keyPair, sw);
+                fut.complete(Buffer.buffer(sw.toString()));
             } catch (IOException e) {
                 fut.fail(e);
-                return;
             }
-            fut.complete(Buffer.buffer(sw.toString()));
         }, handler);
     }
 }

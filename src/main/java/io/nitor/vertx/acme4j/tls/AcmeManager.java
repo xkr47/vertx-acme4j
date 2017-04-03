@@ -46,6 +46,9 @@ import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
 import java.util.*;
 
+import static io.vertx.core.Future.failedFuture;
+import static io.vertx.core.Future.succeededFuture;
+
 public class AcmeManager {
 
     static final String DOMAIN_KEY_PAIR_FILE = "keypair.pem";
@@ -139,42 +142,48 @@ public class AcmeManager {
             vertx.fileSystem().exists(domainKeyPairFile, (AsyncResult<Boolean> keyFileExists) -> {
                 if (keyFileExists.failed()) {
                     // file check failed
-                    handler.handle(.fail(keyFileExists.cause());
-                } else if (keyFileExists.result()) {
+                    handler.handle(failedFuture(keyFileExists.cause()));
+                    return;
+                }
+                if (keyFileExists.result()) {
                     // file exists
                     vertx.fileSystem().readFile(domainKeyPairFile, existingKeyFile -> {
                         if (existingKeyFile.failed()) {
-                            res.fail(existingKeyFile.cause());
+                            handler.handle(failedFuture(existingKeyFile.cause()));
                             return;
                         }
-                        AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile.result(), res);
+                        AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile.result(), readKeyPair -> {
+                            if (readKeyPair.succeeded()) {
+                                logger.info("Existing account keypair read from " + domainKeyPairFile);
+                            }
+                            handler.handle(readKeyPair);
+                        });
                     });
-                    logger.info("Existing account keypair read from " + domainKeyPairFile);
                 } else {
                     // file doesn't exist
-                    Future<KeyPair> keyPairFut = AsyncKeyPairUtils.createKeyPair(vertx, 4096);
+                    AsyncKeyPairUtils.createKeyPair(vertx, 4096, createdKeyPair -> {
                     //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
-                    keyPairFut.compose((keyPair) -> {
-                        Future<KeyPair> resfut = Future.future();
-                        AsyncKeyPairUtils.writeKeyPair(vertx, keyPair).setHandler(keyPairSerialized -> {
+                        if (createdKeyPair.failed()) {
+                            handler.handle(failedFuture(createdKeyPair.cause()));
+                            return;
+                        }
+                        AsyncKeyPairUtils.writeKeyPair(vertx, createdKeyPair.result(), keyPairSerialized -> {
                             if (keyPairSerialized.failed()) {
-                                resfut.fail(keyPairSerialized.cause());
+                                handler.handle(failedFuture(keyPairSerialized.cause()));
                                 return;
                             }
                             vertx.fileSystem().writeFile(domainKeyPairFile, keyPairSerialized.result(), ar3 -> {
                                 if (ar3.failed()) {
-                                    resfut.fail(ar3.cause());
+                                    handler.handle(failedFuture(ar3.cause()));
                                     return;
                                 }
                                 logger.info("New account keypair written to " + domainKeyPairFile);
-                                resfut.complete(keyPair);
+                                handler.handle(succeededFuture(createdKeyPair.result()));
                             });
                         });
-                        return resfut;
-                    }).setHandler(res);
+                    });
                 }
             });
-            return res;
         }
 
         private Registration getOrCreateRegistration(String accountDbId, Account account, Session session) throws AcmeException, IOException, URISyntaxException {
@@ -379,14 +388,14 @@ public class AcmeManager {
     public void start(Handler<AsyncResult<Void>> startArh) {
         vertx.fileSystem().readFile(activeConfigPath(), fileAr -> {
             if (fileAr.failed()) {
-                startArh.handle(Future.failedFuture(fileAr.cause()));
+                startArh.handle(failedFuture(fileAr.cause()));
                 return;
             }
             ObjectMapper objectMapper = new ObjectMapper();
             try {
                 startWithConfig(objectMapper.readValue(fileAr.result().getBytes(), AcmeConfig.class), startArh);
             } catch (IOException e) {
-                startArh.handle(Future.failedFuture(e));
+                startArh.handle(failedFuture(e));
             }
         });
     }
@@ -394,7 +403,7 @@ public class AcmeManager {
     private synchronized void startWithConfig(AcmeConfig conf, Handler<AsyncResult<Void>> startArh) {
         configManager.update(null, conf);
         cur = conf;
-        startArh.handle(Future.succeededFuture());
+        startArh.handle(succeededFuture());
     }
 
     public synchronized void reconfigure(AcmeConfig conf, Handler<AsyncResult<Void>> completionHandler) {
