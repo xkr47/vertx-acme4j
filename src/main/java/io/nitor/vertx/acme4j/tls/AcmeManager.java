@@ -16,6 +16,7 @@
 package io.nitor.vertx.acme4j.tls;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
 import io.nitor.vertx.acme4j.tls.AcmeConfig.Account;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
@@ -70,6 +71,7 @@ public class AcmeManager {
         this.vertx = vertx;
         this.dynamicCertManager = dynamicCertManager;
         this.dbPath = dbPath.endsWith("/") ? dbPath : dbPath + '/';
+        //vertx.executeBlocking();
     }
 
     class AcmeConfigManager {
@@ -96,7 +98,7 @@ public class AcmeManager {
             }
 
             try {
-                KeyPair accountKeyPair = getOrCreateAccountKeyPair(newAccountDbId);
+                KeyPair accountKeyPair = null; getOrCreateAccountKeyPair(newAccountDbId); // TODO
                 Session session = new Session(new URI(newA.providerUrl), accountKeyPair);
                 logger.info("Session set up");
                 Registration registration = getOrCreateRegistration(newAccountDbId, newA, session);
@@ -132,19 +134,49 @@ public class AcmeManager {
             }
         }
 
-        private KeyPair getOrCreateAccountKeyPair(String accountDbId) throws IOException {
-            KeyPair keyPair;
-            String domainKeyPairFile = dbPath + accountDbId + '-' + DOMAIN_KEY_PAIR_FILE;
-            if (new File(domainKeyPairFile).exists()) {
-                keyPair = read(domainKeyPairFile, fr -> KeyPairUtils.readKeyPair(fr));
-                logger.info("Existing account keypair read from " + domainKeyPairFile);
-            } else {
-                //keyPair = KeyPairUtils.createECKeyPair("secp256r1");
-                keyPair = KeyPairUtils.createKeyPair(4096);
-                write(domainKeyPairFile, fw -> KeyPairUtils.writeKeyPair(keyPair, fw));
-                logger.info("New account keypair written to " + domainKeyPairFile);
-            }
-            return keyPair;
+        private Future<KeyPair> getOrCreateAccountKeyPair(String accountDbId) throws IOException {
+            final String domainKeyPairFile = dbPath + accountDbId + '-' + DOMAIN_KEY_PAIR_FILE;
+            final Future<KeyPair> res = Future.future();
+            vertx.fileSystem().exists(domainKeyPairFile, (AsyncResult<Boolean> ar) -> {
+                if (ar.failed()) {
+                    // file check failed
+                    res.fail(ar.cause());
+                } else if (ar.result()) {
+                    // file exists
+                    vertx.fileSystem().readFile(domainKeyPairFile, ar2 -> {
+                        if (ar2.failed()) {
+                            res.fail(ar2.cause());
+                            return;
+                        }
+                        Future<KeyPair> keyPair = AsyncKeyPairUtils.readKeyPair(vertx, ar2.result());
+                        keyPair.setHandler(res);
+                    });
+                    logger.info("Existing account keypair read from " + domainKeyPairFile);
+                } else {
+                    // file doesn't exist
+                    Future<KeyPair> keyPairFut = AsyncKeyPairUtils.createKeyPair(vertx, 4096);
+                    //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
+                    keyPairFut.compose((keyPair) -> {
+                        Future<KeyPair> resfut = Future.future();
+                        AsyncKeyPairUtils.writeKeyPair(vertx, keyPair).setHandler(ar4 -> {
+                            if (ar4.failed()) {
+                                resfut.fail(ar4.cause());
+                                return;
+                            }
+                            vertx.fileSystem().writeFile(domainKeyPairFile, ar4.result(), ar3 -> {
+                                if (ar3.failed()) {
+                                    resfut.fail(ar3.cause());
+                                    return;
+                                }
+                                logger.info("New account keypair written to " + domainKeyPairFile);
+                                resfut.complete(keyPair);
+                            });
+                        });
+                        return resfut;
+                    }).setHandler(res);
+                }
+            });
+            return res;
         }
 
         private Registration getOrCreateRegistration(String accountDbId, Account account, Session session) throws AcmeException, IOException, URISyntaxException {
@@ -231,7 +263,7 @@ public class AcmeManager {
                 */
                 logger.info("Domain {} authorized, status {}", domainName, auth.getStatus());
                 if (auth.getStatus() == Status.VALID) continue; // TODO what statuses really?
-                continue;
+                if (true) continue;
                 logger.info("Challenge combinations supported: " + auth.getCombinations());
                 Collection<Challenge> combination = auth.findCombination(SUPPORTED_CHALLENGES);
                 logger.info("Challenges to complete: " + combination);
@@ -287,7 +319,7 @@ public class AcmeManager {
             dynamicCertManager.put("letsencrypt-cert-" + certificateId, domainKeyPair.getPrivate(), cert, chain);
         }
 
-        private static final String[] SUPPORTED_CHALLENGES = {
+        private final String[] SUPPORTED_CHALLENGES = {
                 TlsSni01Challenge.TYPE,
                 TlsSni02Challenge.TYPE
         };
@@ -367,7 +399,7 @@ public class AcmeManager {
         startArh.handle(Future.succeededFuture());
     }
 
-    public synchronized void reconfigure(AcmeConfig conf) {
+    public synchronized void reconfigure(AcmeConfig conf, Handler<AsyncResult<Void>> completionHandler) {
         if (cur == null) {
             throw new IllegalStateException("Not completed startup yet. Forgot to call start()?");
         }

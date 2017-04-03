@@ -79,7 +79,7 @@ public class TestApp extends AbstractVerticle
         DynamicCertManager certManager = new DynamicCertManager(vertx, dynamicCertOptions, "default");
 
         vertx.executeBlocking(future -> {
-            future.complete(new AcmeManager(certManager));
+            future.complete(new AcmeManager(vertx, certManager, "acmedb"));
         }, false, ar -> {
             logger.info("AcmeManager completed", ar.cause());
         });
