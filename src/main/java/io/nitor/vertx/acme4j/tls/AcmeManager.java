@@ -94,17 +94,19 @@ public class AcmeManager {
                     startArh.handle(h.mapEmpty());
                     return;
                 }
-                List<Future> futures2 = new ArrayList<>();
+                final Future[] next = { succeededFuture() };
                 mapDiff(oldC == null ? new HashMap<>() : oldC.accounts, newC.accounts,
                         (accountId, oldA, newA) -> {
                             Future<Void> fut = future();
-                            am.updateOthers(accountId, oldA, newA, fut);
-                            futures2.add(fut.recover(t -> {
-                                logger.error("While handling account " + accountId, t);
-                                return failedFuture(t);
+                            next[0].setHandler(dummy -> am.updateOthers(accountId, oldA, newA, ar -> {
+                                if (ar.failed()) {
+                                    logger.error("While handling account " + accountId, ar.cause());
+                                }
+                                fut.complete();
                             }));
+                            next[0] = fut;
                         });
-                CompositeFuture.join(futures2).setHandler(ar -> startArh.handle(ar.mapEmpty()));
+                next[0].setHandler(startArh);
             });
         }
     }
