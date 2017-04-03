@@ -76,38 +76,32 @@ public class AcmeManager {
     }
 
     class AcmeConfigManager {
-        public void update(AcmeConfig oldC, AcmeConfig newC, final Handler<AsyncResult<Void>> startArh) {
+        public void update(final AcmeConfig oldC, final AcmeConfig newC, final Handler<AsyncResult<Void>> startArh) {
             newC.validate();
             final AccountManager am = new AccountManager();
-            List<Future> futures = new ArrayList<>();
+            final Future[] prevA = { succeededFuture() };
             mapDiff(oldC == null ? new HashMap<>() : oldC.accounts, newC.accounts,
                     (accountId, oldA, newA) -> {
-                        Future<Void> fut = future();
-                        am.updateCached(accountId, oldA, newA, fut);
-                        futures.add(fut.recover(t -> {
-                            logger.error("While handling account " + accountId, t);
-                            return failedFuture(t);
-                        }));
-                    });
-            CompositeFuture.join(futures).setHandler(h -> {
-                if (h.failed()) {
-                    startArh.handle(h.mapEmpty());
-                    return;
-                }
-                final Future[] next = { succeededFuture() };
-                mapDiff(oldC == null ? new HashMap<>() : oldC.accounts, newC.accounts,
-                        (accountId, oldA, newA) -> {
-                            Future<Void> fut = future();
-                            next[0].setHandler(dummy -> am.updateOthers(accountId, oldA, newA, ar -> {
-                                if (ar.failed()) {
-                                    logger.error("While handling account " + accountId, ar.cause());
-                                }
-                                fut.complete();
-                            }));
-                            next[0] = fut;
+                        final Future prev = prevA[0];
+                        final Future<Void> cur = future();
+                        am.updateCached(accountId, oldA, newA, ar1 -> {
+                            if (ar1.failed()) {
+                                logger.error("While handling account " + accountId, ar1.cause());
+                                prev.setHandler(cur);
+                                return;
+                            }
+                            prev.setHandler(dummy -> {
+                                am.updateOthers(accountId, oldA, newA, ar2 -> {
+                                    if (ar2.failed()) {
+                                        logger.error("While handling account " + accountId, ar2.cause());
+                                    }
+                                    cur.complete();
+                                });
+                            });
                         });
-                next[0].setHandler(startArh);
-            });
+                        prevA[0] = cur;
+                    });
+            prevA[0].setHandler(startArh);
         }
     }
     class AccountManager {
