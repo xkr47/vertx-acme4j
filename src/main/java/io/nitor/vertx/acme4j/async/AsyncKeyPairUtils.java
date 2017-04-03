@@ -15,7 +15,9 @@
  */
 package io.nitor.vertx.acme4j.async;
 
+import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import org.bouncycastle.openssl.PEMException;
@@ -31,28 +33,23 @@ import java.io.StringWriter;
 import java.security.KeyPair;
 
 public class AsyncKeyPairUtils {
-    public static Future<KeyPair> createKeyPair(Vertx vertx, int keysize) {
-        Future<KeyPair> res = Future.future();
+    public static void createKeyPair(Vertx vertx, int keysize, Handler<AsyncResult<KeyPair>> handler) {
         vertx.executeBlocking(fut -> {
             fut.complete(KeyPairUtils.createKeyPair(keysize));
-        }, res);
-        return res;
+        }, handler);
     }
 
-    public static Future<KeyPair> readKeyPair(Vertx vertx, Buffer buf) {
-        Future res = Future.future();
+    public static void readKeyPair(Vertx vertx, Buffer buf, Handler<AsyncResult<KeyPair>> handler) {
         vertx.executeBlocking(fut -> {
             try {
                 fut.complete(KeyPairUtils.readKeyPair(new StringReader(buf.toString())));
             } catch (IOException e) {
                 fut.fail(e);
             }
-        }, res);
-        return res;
+        }, handler);
     }
 
-    public static Future<Buffer> writeKeyPair(Vertx vertx, KeyPair keypair) {
-        Future res = Future.future();
+    public static void writeKeyPair(Vertx vertx, KeyPair keypair, Handler<AsyncResult<Buffer>> handler) {
         vertx.executeBlocking(fut -> {
             StringWriter sw = new StringWriter();
             try (JcaPEMWriter jw = new JcaPEMWriter(sw)) {
@@ -62,7 +59,6 @@ public class AsyncKeyPairUtils {
                 return;
             }
             fut.complete(Buffer.buffer(sw.toString()));
-        }, res);
-        return res;
+        }, handler);
     }
 }

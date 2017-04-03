@@ -134,13 +134,12 @@ public class AcmeManager {
             }
         }
 
-        private Future<KeyPair> getOrCreateAccountKeyPair(String accountDbId) throws IOException {
+        private void getOrCreateAccountKeyPair(String accountDbId, Handler<AsyncResult<KeyPair>> handler) throws IOException {
             final String domainKeyPairFile = dbPath + accountDbId + '-' + DOMAIN_KEY_PAIR_FILE;
-            final Future<KeyPair> res = Future.future();
             vertx.fileSystem().exists(domainKeyPairFile, (AsyncResult<Boolean> keyFileExists) -> {
                 if (keyFileExists.failed()) {
                     // file check failed
-                    res.fail(keyFileExists.cause());
+                    handler.handle(.fail(keyFileExists.cause());
                 } else if (keyFileExists.result()) {
                     // file exists
                     vertx.fileSystem().readFile(domainKeyPairFile, existingKeyFile -> {
@@ -148,8 +147,7 @@ public class AcmeManager {
                             res.fail(existingKeyFile.cause());
                             return;
                         }
-                        Future<KeyPair> keyPair = AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile.result());
-                        keyPair.setHandler(res);
+                        AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile.result(), res);
                     });
                     logger.info("Existing account keypair read from " + domainKeyPairFile);
                 } else {
