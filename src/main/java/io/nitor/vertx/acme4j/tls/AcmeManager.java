@@ -18,9 +18,7 @@ package io.nitor.vertx.acme4j.tls;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
 import io.nitor.vertx.acme4j.tls.AcmeConfig.Account;
-import io.vertx.core.AsyncResult;
-import io.vertx.core.Handler;
-import io.vertx.core.Vertx;
+import io.vertx.core.*;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
@@ -47,6 +45,7 @@ import java.util.*;
 import java.util.function.Consumer;
 
 import static io.vertx.core.Future.failedFuture;
+import static io.vertx.core.Future.future;
 import static io.vertx.core.Future.succeededFuture;
 
 public class AcmeManager {
@@ -74,20 +73,47 @@ public class AcmeManager {
         this.vertx = vertx;
         this.dynamicCertManager = dynamicCertManager;
         this.dbPath = dbPath.endsWith("/") ? dbPath : dbPath + '/';
-        //vertx.executeBlocking();
     }
 
     class AcmeConfigManager {
-        public void update(AcmeConfig oldC, AcmeConfig newC) {
+        public void update(AcmeConfig oldC, AcmeConfig newC, final Handler<AsyncResult<Void>> startArh) {
             newC.validate();
             final AccountManager am = new AccountManager();
+            List<Future> futures = new ArrayList<>();
             mapDiff(oldC == null ? new HashMap<>() : oldC.accounts, newC.accounts,
-                    (accountId, oldA, newA) -> eh(()-> am.update(accountId, oldA, newA), "account " + accountId));
+                    (accountId, oldA, newA) -> {
+                        Future<Void> fut = future();
+                        am.updateCached(accountId, oldA, newA, fut);
+                        futures.add(fut.recover(t -> {
+                            logger.error("While handling account " + accountId, t);
+                            return failedFuture(t);
+                        }));
+                    });
+            CompositeFuture.join(futures).setHandler(h -> {
+                if (h.failed()) {
+                    startArh.handle(h.mapEmpty());
+                    return;
+                }
+                List<Future> futures2 = new ArrayList<>();
+                mapDiff(oldC == null ? new HashMap<>() : oldC.accounts, newC.accounts,
+                        (accountId, oldA, newA) -> {
+                            Future<Void> fut = future();
+                            am.updateOthers(accountId, oldA, newA, fut);
+                            futures2.add(fut.recover(t -> {
+                                logger.error("While handling account " + accountId, t);
+                                return failedFuture(t);
+                            }));
+                        });
+                CompositeFuture.join(futures2).setHandler(ar -> startArh.handle(ar.mapEmpty()));
+            });
         }
     }
-
     class AccountManager {
-        public void update(String accountId, Account oldA, Account newA) {
+        public void updateCached(String accountId, Account oldA, Account newA, Handler<AsyncResult<Void>> updateDone) {
+            updateDone.handle(succeededFuture());
+        }
+
+        public void updateOthers(String accountId, Account oldA, Account newA, Handler<AsyncResult<Void>> updateDone) {
             final CertificateManager cm = new CertificateManager();
             String oldAccountDbId = accountDbIdFor(accountId, oldA);
             String newAccountDbId = accountDbIdFor(accountId, newA);
@@ -100,26 +126,36 @@ public class AcmeManager {
                 oldA = null;
             }
 
+            final Account oldA2 = oldA;
+
             getOrCreateAccountKeyPair(newAccountDbId, accountKeyPair -> {
+                if (accountKeyPair.failed()) {
+                    updateDone.handle(accountKeyPair.mapEmpty());
+                    return;
+                }
                 Session session;
                 try {
                     session = new Session(new URI(newA.providerUrl), accountKeyPair.result());
                 } catch (URISyntaxException e) {
-                    e.printStackTrace();
+                    updateDone.handle(failedFuture(e));
                     return;
                 }
                 logger.info("Session set up");
-                Registration registration = getOrCreateRegistration(newAccountDbId, newA, session);
-
-                try {
-                    updateCerts(registration, newAccountDbId, cm, oldA, newA);
-                } catch (RuntimeException e) {
-                    if (!(e.getCause() instanceof AcmeUnauthorizedException)) {
-                        throw e;
+                getOrCreateRegistration(newAccountDbId, newA, session, registration -> {
+                    if (registration.failed()) {
+                        updateDone.handle(registration.mapEmpty());
+                        return;
                     }
+                    try {
+                        updateCerts(registration.result(), newAccountDbId, cm, oldA2, newA);
+                    } catch (RuntimeException e) {
+                        if (!(e.getCause() instanceof AcmeUnauthorizedException)) {
+                            throw e;
+                        }
 
-                    updateCerts(registration, newAccountDbId, cm, oldA, newA);
-                }
+                        updateCerts(registration.result(), newAccountDbId, cm, oldA2, newA);
+                    }
+                });
             });
         }
 
@@ -145,14 +181,14 @@ public class AcmeManager {
             vertx.fileSystem().exists(keyPairFile, (AsyncResult<Boolean> keyFileExists) -> {
                 if (keyFileExists.failed()) {
                     // file check failed
-                    doneHandler.handle(failedFuture(keyFileExists.cause()));
+                    doneHandler.handle(keyFileExists.mapEmpty());
                     return;
                 }
                 if (keyFileExists.result()) {
                     // file exists
                     vertx.fileSystem().readFile(keyPairFile, existingKeyFile -> {
                         if (existingKeyFile.failed()) {
-                            doneHandler.handle(failedFuture(existingKeyFile.cause()));
+                            doneHandler.handle(existingKeyFile.mapEmpty());
                             return;
                         }
                         AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile.result(), readKeyPair -> {
@@ -165,19 +201,19 @@ public class AcmeManager {
                 } else {
                     // file doesn't exist
                     creator.accept(createdKeyPair -> {
-                    //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
+                        //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
                         if (createdKeyPair.failed()) {
-                            doneHandler.handle(failedFuture(createdKeyPair.cause()));
+                            doneHandler.handle(createdKeyPair.mapEmpty());
                             return;
                         }
                         AsyncKeyPairUtils.writeKeyPair(vertx, createdKeyPair.result(), keyPairSerialized -> {
                             if (keyPairSerialized.failed()) {
-                                doneHandler.handle(failedFuture(keyPairSerialized.cause()));
+                                doneHandler.handle(keyPairSerialized.mapEmpty());
                                 return;
                             }
                             vertx.fileSystem().writeFile(keyPairFile, keyPairSerialized.result(), ar3 -> {
                                 if (ar3.failed()) {
-                                    doneHandler.handle(failedFuture(ar3.cause()));
+                                    doneHandler.handle(ar3.mapEmpty());
                                     return;
                                 }
                                 logger.info("New account keypair written to " + keyPairFile);
@@ -189,7 +225,7 @@ public class AcmeManager {
             });
         }
 
-        private Registration getOrCreateRegistration(String accountDbId, Account account, Session session) throws AcmeException, IOException, URISyntaxException {
+        private void getOrCreateRegistration(String accountDbId, Account account, Session session, Handler<AsyncResult<Registration>> doneHandler) {
             // TODO update registration when agreement, contact or others change (save to file what were last used values)
             Registration registration;
             String domainAccountLocationFile = dbPath + accountDbId + '-' + DOMAIN_ACCOUNT_LOCATION_FILE;
@@ -389,40 +425,71 @@ public class AcmeManager {
     }
 
     public void start(Handler<AsyncResult<Void>> startArh) {
+        if (state != State.NOT_STARTED) {
+            throw new IllegalStateException("Already started");
+        }
+        synchronized (AcmeManager.this) {
+            state = State.UPDATING;
+        }
         vertx.fileSystem().readFile(activeConfigPath(), fileAr -> {
             if (fileAr.failed()) {
-                startArh.handle(failedFuture(fileAr.cause()));
+                synchronized (AcmeManager.this) {
+                    state = State.FAILED;
+                }
+                startArh.handle(fileAr.mapEmpty());
                 return;
             }
-            ObjectMapper objectMapper = new ObjectMapper();
-            try {
-                startWithConfig(objectMapper.readValue(fileAr.result().getBytes(), AcmeConfig.class), startArh);
-            } catch (IOException e) {
-                startArh.handle(failedFuture(e));
-            }
+            vertx.<AcmeConfig>executeBlocking(fut -> {
+                try {
+                    ObjectMapper objectMapper = new ObjectMapper();
+                    fut.complete(objectMapper.readValue(fileAr.result().getBytes(), AcmeConfig.class));
+                } catch (IOException e) {
+                    fut.fail(e);
+                }
+            }, readConf -> {
+                if (readConf.failed()) {
+                    synchronized (AcmeManager.this) {
+                        state = State.FAILED;
+                    }
+                    startArh.handle(readConf.mapEmpty());
+                    return;
+                }
+                startWithConfig(readConf.result(), ar -> {
+                    synchronized (AcmeManager.this) {
+                        state = ar.failed() ? State.FAILED : State.OK;
+                    }
+                    startArh.handle(ar);
+                });
+            });
         });
     }
 
-    private synchronized void startWithConfig(AcmeConfig conf, Handler<AsyncResult<Void>> startArh) {
-        configManager.update(null, conf);
-        cur = conf;
-        startArh.handle(succeededFuture());
+    enum State { NOT_STARTED, UPDATING, OK, FAILED };
+
+    private State state = State.NOT_STARTED;
+
+    private void startWithConfig(AcmeConfig conf, Handler<AsyncResult<Void>> startArh) {
+        configManager.update(null, conf, ar -> {
+            if (ar.succeeded()) {
+                cur = conf;
+            }
+            startArh.handle(ar);
+        });
     }
 
-    public synchronized void reconfigure(AcmeConfig conf, Handler<AsyncResult<Void>> completionHandler) {
-        if (cur == null) {
-            throw new IllegalStateException("Not completed startup yet. Forgot to call start()?");
+    public void reconfigure(AcmeConfig conf, Handler<AsyncResult<Void>> completionHandler) {
+        synchronized (AcmeManager.this) {
+            if (state != State.OK) {
+                throw new IllegalStateException("Wrong state " + state);
+            }
+            state = State.UPDATING;
         }
-        configManager.update(cur, conf);
-        cur = conf.clone();
-        /*
-        for (boolean validate : new boolean[] { true, false }) {
-            root.getJsonArray("accounts").stream().map(JsonObject.class::cast)
-                    .forEach(account ->
-                            reconfigureAccount(account, validate)
-                    );
-        }
-        */
+        configManager.update(cur, conf, ar -> {
+            if (ar.succeeded()) {
+                cur = conf.clone();
+            }
+            completionHandler.handle(ar);
+        });
     }
 
     private static <K, V> void mapDiff(Map<K, V> old, Map<K, V> nev, MapDiffHandler<K, V> handler) {
