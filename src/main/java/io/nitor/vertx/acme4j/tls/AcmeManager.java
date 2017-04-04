@@ -90,12 +90,14 @@ public class AcmeManager {
                                 prev.setHandler(cur);
                                 return;
                             }
-                            prev.setHandler(dummy -> {
+                            prev.setHandler(prevResult -> {
                                 am.updateOthers(ar2 -> {
                                     if (ar2.failed()) {
                                         logger.error("While handling account " + account.key, ar2.cause());
+                                        cur.fail("Some account(s) failed");
+                                        return;
                                     }
-                                    cur.complete();
+                                    cur.handle(prevResult);
                                 });
                             });
                         });
