@@ -45,6 +45,7 @@ import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static io.vertx.core.Future.*;
 import static java.util.stream.Collectors.toList;
@@ -53,6 +54,7 @@ public class AcmeManager {
 
     static final String DOMAIN_KEY_PAIR_FILE = "keypair.pem";
     static final String DOMAIN_ACCOUNT_LOCATION_FILE = "accountLocation.txt";
+    static final String ACCEPTED_TERMS_LOCATION_FILE = "acceptedTermsLocation.txt";
     static final String ACTIVE_CONF_PATH = "active.json";
     //static final String CONTACT_EMAIL = null;
     //static final String[] DOMAIN_NAMES = {"a139189489518.example.org"};
@@ -112,101 +114,77 @@ public class AcmeManager {
 
     class AccountManager {
         final String accountId;
-        final Account oldAEvenIfDifferent;
-        Account oldA;
-        final Account newA;
+        final Account oldAOrig;
+        final Account newAOrig;
         final String oldAccountDbId;
         final String newAccountDbId;
 
         public AccountManager(String accountId, Account oldA, Account newA) {
             this.accountId = accountId;
-            this.oldAEvenIfDifferent = oldA;
-            this.oldA = oldA;
-            this.newA = newA;
+            this.oldAOrig = oldA;
+            this.newAOrig = newA;
             oldAccountDbId = accountDbIdFor(accountId, oldA);
             newAccountDbId = accountDbIdFor(accountId, newA);
         }
 
-        public void updateCached(Handler<AsyncResult<Void>> updateDone) {
-            Future<Void> oldAccDone = future();
-            if (newA == null || !newAccountDbId.equals(oldAccountDbId)) {
-                // deregister all certificates for this account; account destruction should be handled in some other way
-                List<Future> futures = oldAEvenIfDifferent.certificates.entrySet().stream().map(e -> {
-                    final CertificateManager cm = new CertificateManager(null, oldAccountDbId, e.getKey(), e.getValue(), null);
-                    Future fut = future();
-                    cm.updateCached(ar -> {
-                        if (ar.failed()) {
-                            fut.fail(new RuntimeException("For certificate " + e.getKey(), ar.cause()));
-                            return;
-                        }
-                        fut.succeeded();
-                    });
-                    return fut;
-                }).collect(Collectors.toList());
-                CompositeFuture.join(futures).setHandler(ar -> {
-                    CompositeFuture cf = ar.result();
+        public void updateCached(final Handler<AsyncResult<Void>> updateDone) {
+            if (newAOrig == null || !newAccountDbId.equals(oldAccountDbId)) {
+                // deregister all certificates for old account; account destruction should be handled in some other way
+                updateCached2(oldAccountDbId, oldAOrig, null, ar -> {
                     if (ar.failed()) {
-                        List<Throwable> collect = range(0, cf.size()).stream().filter(i -> cf.failed(i)).map(i -> cf.cause(i)).collect(toList());
-                        updateDone.handle(failedFuture(MultiException.wrapIfNeeded(collect)));
+                        updateDone.handle(ar);
                         return;
                     }
-                    if (newA == null) {
-                        updateDone.handle(succeededFuture());
-                        return;
-                    }
-                    oldA = null;
-                    oldAccDone.complete();
+                    // register all certificates for new account
+                    updateCached2(newAccountDbId, null, newAOrig, updateDone);
                 });
             } else {
-                oldAccDone.complete();
+                // update all certificates for same account
+                updateCached2(newAccountDbId, oldAOrig, newAOrig, updateDone);
             }
-
-            oldAccDone.setHandler(arrr -> {
-                mapDiff(oldA == null ? new HashMap<>() : oldA.certificates, newA.certificates,
-                        (certificateId, oldC, newC) -> {
-                    final CertificateManager cm = new CertificateManager(null, newAccountDbId, certificateId, oldC, newC);
-                    Future fut = future();
-                    cm.updateCached(ar -> {
-                        if (ar.failed()) {
-                            fut.fail(new RuntimeException("For certificate " + certificateId, ar.cause()));
-                            return;
-                        }
-                        fut.succeeded();
-                    });
-                    return fut;
-                }).collect(Collectors.toList());
-                CompositeFuture.join(futures).setHandler(ar -> {
-                    CompositeFuture cf = ar.result();
-                    if (ar.failed()) {
-                        List<Throwable> collect = range(0, cf.size()).stream().filter(i -> cf.failed(i)).map(i -> cf.cause(i)).collect(toList());
-                        updateDone.handle(failedFuture(MultiException.wrapIfNeeded(collect)));
-                        return;
-                    }
-                    if (newA == null) {
-                        updateDone.handle(succeededFuture());
-                        return;
-                    }
-                    oldA = null;
-                    oldAccDone.complete();
-                });
-
-                updateDone.handle(ar);
-            });
         }
 
-        public void updateOthers(Handler<AsyncResult<Void>> updateDone) {
-            final CertificateManager cm = new CertificateManager();
-            if (newA == null || !newAccountDbId.equals(oldAccountDbId)) {
-                // deregister all certificates for this account; account destruction should be handled in some other way
-                oldAEvenIfDifferent.certificates.entrySet().forEach(e -> eh(() -> cm.update(null, accountId, e.getKey(), e.getValue(), null), "certificate " + e.getKey()));
-                if (newA == null) {
-                    return;
-                }
-                oldA = null;
+        private void updateCached2(String accountDbId, Account oldA, Account newA, Handler<AsyncResult<Void>> updateDone) {
+            Map<String, AcmeConfig.Certificate> oldCs = oldA == null ? new HashMap<>() : oldA.certificates;
+            Map<String, AcmeConfig.Certificate> newCs = newA == null ? new HashMap<>() : newA.certificates;
+            List<Future> futures = mapDiff(oldCs, newCs)
+                    .stream()
+                    .map((certificate) -> {
+                        final CertificateManager cm = new CertificateManager(null, accountDbId, certificate.key, certificate.oldValue, certificate.newValue);
+                        Future fut = future();
+                        cm.updateCached(ar -> {
+                            if (ar.failed()) {
+                                fut.fail(new RuntimeException("For certificate " + certificate.key, ar.cause()));
+                                return;
+                            }
+                            fut.complete();
+                        });
+                        return fut;
+                    }).collect(Collectors.toList());
+            join(futures, updateDone);
+        }
+
+        public void updateOthers(final Handler<AsyncResult<Void>> updateDone) {
+            if (newAOrig == null || !newAccountDbId.equals(oldAccountDbId)) {
+                /*// deregister all certificates for old account; account destruction should be handled in some other way
+                updateOthers2(oldAccountDbId, oldAOrig, null, ar -> {
+                    if (ar.failed()) {
+                        updateDone.handle(ar);
+                        return;
+                    }
+                    */
+                    // register all certificates for new account
+                    updateOthers2(null, updateDone);
+                /*
+                });
+                 */
+            } else {
+                // update all certificates for same account
+                updateOthers2(oldAOrig, updateDone);
             }
+        }
 
-            final Account oldA2 = oldA;
-
+        public void updateOthers2(Account oldA, Handler<AsyncResult<Void>> updateDone) {
             getOrCreateAccountKeyPair(newAccountDbId, accountKeyPair -> {
                 if (accountKeyPair.failed()) {
                     updateDone.handle(accountKeyPair.mapEmpty());
@@ -214,33 +192,50 @@ public class AcmeManager {
                 }
                 Session session;
                 try {
-                    session = new Session(new URI(newA.providerUrl), accountKeyPair.result());
+                    session = new Session(new URI(newAOrig.providerUrl), accountKeyPair.result());
                 } catch (URISyntaxException e) {
                     updateDone.handle(failedFuture(e));
                     return;
                 }
-                logger.info("Session set up");
-                getOrCreateRegistration(newAccountDbId, newA, session, registration -> {
-                    if (registration.failed())      {
+                logger.info(accountId + ": Session set up");
+                getOrCreateRegistration(newAccountDbId, newAOrig, session, registration -> {
+                    if (registration.failed()) {
                         updateDone.handle(registration.mapEmpty());
                         return;
                     }
-                    try {
-                        updateCerts(registration.result(), newAccountDbId, cm, oldA2, newA);
-                    } catch (RuntimeException e) {
-                        if (!(e.getCause() instanceof AcmeUnauthorizedException)) {
-                            throw e;
-                        }
 
-                        updateCerts(registration.result(), newAccountDbId, cm, oldA2, newA);
-                    }
+                    Map<String, AcmeConfig.Certificate> oldCs = oldA == null ? new HashMap<>() : oldA.certificates;
+                    Map<String, AcmeConfig.Certificate> newCs = newAOrig == null ? new HashMap<>() : newAOrig.certificates;
+                    List<Future> futures = mapDiff(oldCs, newCs)
+                            .stream()
+                            .map((certificate) -> {
+                                final CertificateManager cm = new CertificateManager(null, newAccountDbId, certificate.key, certificate.oldValue, certificate.newValue);
+                                Future fut = future();
+                                cm.updateOthers(ar -> {
+                                    if (ar.failed()) {
+                                        /*
+                                        if (ar.cause() instanceof AcmeUnauthorizedException) {
+                                            // TODO update terms&cond
+                                            cm.updateOthers(ar2 -> {
+                                                if (ar2.failed()) {
+                                                    fut.fail(new RuntimeException("For certificate " + certificate.key, ar2.cause()));
+                                                    return;
+                                                }
+                                                fut.complete();
+                                            });
+                                            return;
+                                        }
+                                        */
+                                        fut.fail(new RuntimeException("For certificate " + certificate.key, ar.cause()));
+                                        return;
+                                    }
+                                    fut.complete();
+                                });
+                                return fut;
+                            }).collect(Collectors.toList());
+                    join(futures, updateDone);
                 });
             });
-        }
-
-        private void updateCerts(Registration registration, String newAccountDbId, CertificateManager cm, Account oldA, Account newA) {
-            mapDiff(oldA == null ? new HashMap<>() : oldA.certificates, newA.certificates,
-                    (certificateId, oldC, newC) -> eh(() -> cm.update(registration, newAccountDbId, certificateId, oldC, newC), "certificate " + certificateId));
         }
 
         private String accountDbIdFor(String accountId, Account account) {
@@ -306,50 +301,73 @@ public class AcmeManager {
 
         private void getOrCreateRegistration(String accountDbId, Account account, Session session, Handler<AsyncResult<Registration>> doneHandler) {
             // TODO update registration when agreement, contact or others change (save to file what were last used values)
-            Registration registration;
             String domainAccountLocationFile = dbPath + accountDbId + '-' + DOMAIN_ACCOUNT_LOCATION_FILE;
-            boolean created = false;
-            String[] contactURIs = account.contactURIs == null ? new String[0] : account.contactURIs;
-            if (new File(domainAccountLocationFile).exists()) {
-                logger.info("Domain account location file " + domainAccountLocationFile + " exists, using..");
-                URI location = new URI(read(domainAccountLocationFile, r -> r.readLine()));
-                logger.info("Domain account location: " + location);
-                registration = Registration.bind(session, location);
-                logger.info("Registration successfully bound");
-            } else {
-                logger.info("No domain account location file, attempting to create new registration");
-                RegistrationBuilder builder = new RegistrationBuilder();
-                for (String uri : contactURIs) {
-                    builder.addContact(uri);
+            vertx.fileSystem().exists(domainAccountLocationFile, (AsyncResult<Boolean> keyFileExists) -> {
+                if (keyFileExists.failed()) {
+                    doneHandler.handle(keyFileExists.mapEmpty());
+                    return;
                 }
-                try {
-                    registration = builder.create(session);
-                    created = true;
-                    logger.info("Registration successfully created");
-                } catch (AcmeConflictException e) {
-                    logger.info("Registration existed, using provided location: " + e.getLocation());
-                    registration = Registration.bind(session, e.getLocation());
-                    logger.info("Registration successfully bound");
+                boolean created = false;
+                final String[] contactURIs = account.contactURIs == null ? new String[0] : account.contactURIs;
+                final Future<Registration> fut = future();
+                if (keyFileExists.result()) {
+                    logger.info("Domain account location file " + domainAccountLocationFile + " exists, using..");
+                    vertx.fileSystem().readFile(domainAccountLocationFile, domainAccountLocation -> {
+                        if (domainAccountLocation.failed()) {
+                            doneHandler.handle(domainAccountLocation.mapEmpty());
+                            return;
+                        }
+                        URI location = new URI(domainAccountLocation.result().toString());
+                        logger.info("Domain account location: " + location);
+                        Registration registration = Registration.bind(session, location);
+                        logger.info("Registration successfully bound");
+                        fut.complete(registration);
+                    });
+                } else {
+                    vertx.executeBlocking(fut2 -> {
+                        logger.info("No domain account location file, attempting to create new registration");
+                        RegistrationBuilder builder = new RegistrationBuilder();
+                        for (String uri : contactURIs) {
+                            builder.addContact(uri);
+                        }
+                        try {
+                            registration = builder.create(session);
+                            created = true;
+                            logger.info("Registration successfully created");
+                        } catch (AcmeConflictException e) {
+                            logger.info("Registration existed, using provided location: " + e.getLocation());
+                            registration = Registration.bind(session, e.getLocation());
+                            logger.info("Registration successfully bound");
+                        }
+                        final Registration finalRegistration = registration;
+                        write(domainAccountLocationFile, w -> w.write(finalRegistration.getLocation().toASCIIString()));
+                        logger.info("Domain account location file " + domainAccountLocationFile + " saved");
+                    }, ar -> {
+
+                    });
                 }
-                final Registration finalRegistration = registration;
-                write(domainAccountLocationFile, w -> w.write(finalRegistration.getLocation().toASCIIString()));
-                logger.info("Domain account location file " + domainAccountLocationFile + " saved");
-            }
-            /*
-            boolean contactsChanged = !created && !registration.getContacts().equals(asList(account.contactURIs).stream().map(this::toURI).collect(Collectors.toList()));
-            boolean agreementChanged = created || !registration.getAgreement().equals(toURI(account.acceptedAgreementUrl));
-            if (contactsChanged || agreementChanged) {
-                Registration.EditableRegistration editableRegistration = registration.modify();
-                List<URI> editableContacts = editableRegistration.getContacts();
-                editableContacts.clear();
-                for (String uri : contactURIs) {
-                    editableContacts.add(toURI(uri));
-                }
-                editableRegistration.setAgreement(toURI(account.acceptedAgreementUrl));
-                editableRegistration.commit();
-            }
-            */
-            return registration;
+                fut.setHandler(ar -> {
+                    if (ar.failed()) {
+                        doneHandler.handle(ar.mapEmpty());
+                    }
+                    String acceptedTermsLocationFile = dbPath + accountDbId + '-' + ACCEPTED_TERMS_LOCATION_FILE;
+                    String acceptedTermsLocation = "TODO";
+                    boolean contactsChanged = !created && !registration.getContacts().equals(asList(account.contactURIs).stream().map(this::toURI).collect(Collectors.toList()));
+                    boolean agreementChanged = created || !acceptedTermsLocation.equals(account.acceptedAgreementUrl);
+                    if (contactsChanged || agreementChanged) {
+                        Registration.EditableRegistration editableRegistration = registration.modify();
+                        List<URI> editableContacts = editableRegistration.getContacts();
+                        editableContacts.clear();
+                        for (String uri : contactURIs) {
+                            editableContacts.add(toURI(uri));
+                        }
+                        editableRegistration.setAgreement(toURI(account.acceptedAgreementUrl));
+                        editableRegistration.commit();
+                    }
+
+                    doneHandler.handle(succeededFuture(registration));
+                });
+            });
         }
     }
 
@@ -707,24 +725,15 @@ public class AcmeManager {
         }
     }
 
-
-    /**
-     * @param begin inclusive
-     * @param end exclusive
-     * @return list of integers from begin to end
-     * @see https://stackoverflow.com/questions/371026/shortest-way-to-get-an-iterator-over-a-range-of-integers-in-java#6828887
-     */
-    public static List<Integer> range(final int begin, final int end) {
-        return new AbstractList<Integer>() {
-            @Override
-            public Integer get(int index) {
-                return begin + index;
+    static void join(List<Future> futures, Handler<AsyncResult<Void>> updateDone) {
+        CompositeFuture.join(futures).setHandler(ar -> {
+            CompositeFuture cf = ar.result();
+            if (ar.failed()) {
+                List<Throwable> collect = IntStream.range(0, cf.size()).filter(i -> cf.failed(i)).mapToObj(i -> cf.cause(i)).collect(toList());
+                updateDone.handle(failedFuture(MultiException.wrapIfNeeded(collect)));
+                return;
             }
-
-            @Override
-            public int size() {
-                return end - begin;
-            }
-        };
+            updateDone.handle(succeededFuture());
+        });
     }
 }
