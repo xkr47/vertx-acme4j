@@ -16,7 +16,6 @@
 package io.nitor.vertx.acme4j.tls;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.netty.util.concurrent.Promise;
 import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
 import io.nitor.vertx.acme4j.tls.AcmeConfig.Account;
 import io.vertx.core.*;
@@ -44,11 +43,10 @@ import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static io.vertx.core.Future.failedFuture;
-import static io.vertx.core.Future.future;
-import static io.vertx.core.Future.succeededFuture;
+import static io.vertx.core.Future.*;
 import static java.util.stream.Collectors.toList;
 
 public class AcmeManager {
@@ -79,34 +77,37 @@ public class AcmeManager {
     }
 
     class AcmeConfigManager {
-        public void update(final AcmeConfig oldC, final AcmeConfig newC, final Handler<AsyncResult<Void>> startArh) {
+        public void update(final AcmeConfig oldC, final AcmeConfig newC, final Handler<AsyncResult<Void>> doneHandler) {
             newC.validate();
-            final Future[] prevA = { succeededFuture() };
-            mapDiff(oldC == null ? new HashMap<>() : oldC.accounts, newC.accounts,
-                    (accountId, oldA, newA) -> {
-                        final AccountManager am = new AccountManager(accountId, oldA, newA);
-                        final Future prev = prevA[0];
+            mapDiff(oldC == null ? new HashMap<>() : oldC.accounts, newC.accounts)
+                    .stream()
+                    .map((account) -> (Function<Future<Void>, Future<Void>>) prev -> {
+                        final AccountManager am = new AccountManager(account.key, account.oldValue, account.newValue);
                         final Future<Void> cur = future();
                         am.updateCached(ar1 -> {
                             if (ar1.failed()) {
-                                logger.error("While handling account " + accountId, ar1.cause());
+                                logger.error("While handling account " + account.key, ar1.cause());
                                 prev.setHandler(cur);
                                 return;
                             }
                             prev.setHandler(dummy -> {
                                 am.updateOthers(ar2 -> {
                                     if (ar2.failed()) {
-                                        logger.error("While handling account " + accountId, ar2.cause());
+                                        logger.error("While handling account " + account.key, ar2.cause());
                                     }
                                     cur.complete();
                                 });
                             });
                         });
-                        prevA[0] = cur;
-                    });
-            prevA[0].setHandler(startArh);
+                        return cur;
+                    })
+                    .reduce(Function::andThen)
+                    .orElse(f -> f)
+                    .apply(succeededFuture())
+                    .setHandler(doneHandler);
         }
     }
+
     class AccountManager {
         final String accountId;
         final Account oldAEvenIfDifferent;
@@ -585,15 +586,16 @@ public class AcmeManager {
         });
     }
 
-    private static <K, V> void mapDiff(Map<K, V> old, Map<K, V> nev, MapDiffHandler<K, V> handler) {
-        old.entrySet().forEach(e -> {
-            handler.handle(e.getKey(), e.getValue(), nev.get(e.getKey()));
-        });
-        nev.entrySet().forEach(e -> {
-            if (!old.containsKey(e.getKey())) {
-                handler.handle(e.getKey(), null, e.getValue());
-            }
-        });
+    private static <K, V> List<MapDiff<K,V>> mapDiff(final Map<K, V> old, final Map<K, V> nev) {
+        List<MapDiff<K, V>> res = old.entrySet().stream()
+                .map(e -> new MapDiff<>(e.getKey(), e.getValue(), nev.get(e.getKey())))
+                .collect(toList());
+        List<MapDiff<K, V>> res2 = nev.entrySet().stream()
+                .filter(e -> !old.containsKey(e.getKey()))
+                .map(e -> new MapDiff<>(e.getKey(), null, e.getValue()))
+                .collect(toList());
+        res.addAll(res);
+        return res;
     }
 
     /*
@@ -679,9 +681,15 @@ public class AcmeManager {
         }
     }
 
-    @FunctionalInterface
-    public interface MapDiffHandler<K, V> {
-        void handle(K key, V old, V nev);
+    public static class MapDiff<K, V> {
+        public final K key;
+        public final V oldValue;
+        public final V newValue;
+        public MapDiff(K key, V oldValue, V newValue) {
+            this.key = key;
+            this.oldValue = oldValue;
+            this.newValue = newValue;
+        }
     }
 
     @FunctionalInterface
