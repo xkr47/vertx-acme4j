@@ -189,32 +189,22 @@ public class AcmeManager {
         }
 
         public void updateOthers2(Account oldA, Handler<AsyncResult<Void>> updateDone) {
-            getOrCreateAccountKeyPair(newAccountDbId, accountKeyPair -> {
-                if (accountKeyPair.failed()) {
-                    updateDone.handle(accountKeyPair.mapEmpty());
-                    return;
-                }
+            ff((Future<KeyPair> fut) -> getOrCreateAccountKeyPair(newAccountDbId, fut)).compose(accountKeyPair -> {
                 Session session;
                 try {
-                    session = new Session(new URI(newAOrig.providerUrl), accountKeyPair.result());
+                    session = new Session(new URI(newAOrig.providerUrl), accountKeyPair);
                 } catch (URISyntaxException e) {
-                    updateDone.handle(failedFuture(e));
-                    return;
+                    return failedFuture(e);
                 }
                 logger.info(accountId + ": Session set up");
-                getOrCreateRegistration(newAccountDbId, newAOrig, session, registration -> {
-                    if (registration.failed()) {
-                        updateDone.handle(registration.mapEmpty());
-                        return;
-                    }
-
+                return ff((Future<Registration> fut) -> getOrCreateRegistration(newAccountDbId, newAOrig, session, fut)).compose(registration -> {
                     Map<String, AcmeConfig.Certificate> oldCs = oldA == null ? new HashMap<>() : oldA.certificates;
                     Map<String, AcmeConfig.Certificate> newCs = newAOrig == null ? new HashMap<>() : newAOrig.certificates;
-                    List<Future> futures = mapDiff(oldCs, newCs)
+                    List<Future<?>> futures = mapDiff(oldCs, newCs)
                             .stream()
                             .map((certificate) -> {
-                                final CertificateManager cm = new CertificateManager(null, newAccountDbId, certificate.key, certificate.oldValue, certificate.newValue);
-                                Future fut = future();
+                                final CertificateManager cm = new CertificateManager(registration, newAccountDbId, certificate.key, certificate.oldValue, certificate.newValue);
+                                Future<?> fut = future();
                                 cm.updateOthers(ar -> {
                                     if (ar.failed()) {
                                         /*
@@ -237,9 +227,9 @@ public class AcmeManager {
                                 });
                                 return fut;
                             }).collect(Collectors.toList());
-                    join(futures, updateDone);
+                    return join(futures);
                 });
-            });
+            }).setHandler(updateDone);
         }
 
         private String accountDbIdFor(String accountId, Account account) {
@@ -775,14 +765,39 @@ public class AcmeManager {
 
     static void join(List<Future> futures, Handler<AsyncResult<Void>> updateDone) {
         CompositeFuture.join(futures).setHandler(ar -> {
-            CompositeFuture cf = ar.result();
-            if (ar.failed()) {
+            CompositeFuture cf = (CompositeFuture)ar; // uggggh
+            if (cf.failed()) {
                 List<Throwable> collect = IntStream.range(0, cf.size()).filter(i -> cf.failed(i)).mapToObj(i -> cf.cause(i)).collect(toList());
                 updateDone.handle(failedFuture(MultiException.wrapIfNeeded(collect)));
                 return;
             }
             updateDone.handle(succeededFuture());
         });
+    }
+
+    static Future<Void> join(List<Future<?>> futures) {
+        return futures
+                .stream()
+                .map((fut) -> (Function<Future<List<Throwable>>, Future<List<Throwable>>>) prev ->
+                        prev.compose(throwables -> {
+                            Future<List<Throwable>> res = future();
+                            fut.setHandler(futRes -> {
+                                if (futRes.failed()) {
+                                    throwables.add(futRes.cause());
+                                }
+                                res.complete(throwables);
+                            });
+                            return res;
+                        }))
+                .reduce(Function::andThen)
+                .orElse(f -> f)
+                .apply(succeededFuture(new ArrayList<>()))
+                .compose(throwables -> {
+                    if (!throwables.isEmpty()) {
+                        return failedFuture(MultiException.wrapIfNeeded(throwables));
+                    }
+                    return succeededFuture();
+                });
     }
 
     static <T> Future<T> ff(Consumer<Future<T>> consumer) {
