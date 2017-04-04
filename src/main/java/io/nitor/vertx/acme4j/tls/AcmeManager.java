@@ -19,6 +19,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
 import io.nitor.vertx.acme4j.tls.AcmeConfig.Account;
 import io.vertx.core.*;
+import io.vertx.core.buffer.Buffer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
@@ -42,12 +43,15 @@ import java.security.KeyPair;
 import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
 import java.util.*;
+import java.util.AbstractMap.SimpleEntry;
+import java.util.Map.Entry;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static io.vertx.core.Future.*;
+import static io.vertx.core.buffer.Buffer.buffer;
 import static java.util.stream.Collectors.toList;
 
 public class AcmeManager {
@@ -307,29 +311,37 @@ public class AcmeManager {
                     doneHandler.handle(keyFileExists.mapEmpty());
                     return;
                 }
-                boolean created = false;
                 final String[] contactURIs = account.contactURIs == null ? new String[0] : account.contactURIs;
-                final Future<Registration> fut = future();
+                final Future<Entry<Registration, Boolean>> registrationFut = future();
                 if (keyFileExists.result()) {
                     logger.info("Domain account location file " + domainAccountLocationFile + " exists, using..");
                     vertx.fileSystem().readFile(domainAccountLocationFile, domainAccountLocation -> {
                         if (domainAccountLocation.failed()) {
-                            doneHandler.handle(domainAccountLocation.mapEmpty());
+                            registrationFut.fail(domainAccountLocation.cause());
                             return;
                         }
-                        URI location = new URI(domainAccountLocation.result().toString());
-                        logger.info("Domain account location: " + location);
+                        String locationStr = domainAccountLocation.result().toString();
+                        logger.info("Domain account location: " + locationStr);
+                        URI location;
+                        try {
+                            location = new URI(locationStr);
+                        } catch (URISyntaxException e) {
+                            registrationFut.fail(e);
+                            return;
+                        }
                         Registration registration = Registration.bind(session, location);
                         logger.info("Registration successfully bound");
-                        fut.complete(registration);
+                        registrationFut.complete(new SimpleEntry<>(registration, false));
                     });
                 } else {
-                    vertx.executeBlocking(fut2 -> {
+                    vertx.executeBlocking((Future<Entry<Registration, Boolean>> createFut) -> {
                         logger.info("No domain account location file, attempting to create new registration");
                         RegistrationBuilder builder = new RegistrationBuilder();
                         for (String uri : contactURIs) {
                             builder.addContact(uri);
                         }
+                        boolean created = false;
+                        Registration registration;
                         try {
                             registration = builder.create(session);
                             created = true;
@@ -338,34 +350,70 @@ public class AcmeManager {
                             logger.info("Registration existed, using provided location: " + e.getLocation());
                             registration = Registration.bind(session, e.getLocation());
                             logger.info("Registration successfully bound");
+                        } catch (AcmeException e) {
+                            createFut.fail(e);
+                            return;
                         }
-                        final Registration finalRegistration = registration;
-                        write(domainAccountLocationFile, w -> w.write(finalRegistration.getLocation().toASCIIString()));
-                        logger.info("Domain account location file " + domainAccountLocationFile + " saved");
-                    }, ar -> {
-
+                        createFut.complete(new SimpleEntry<>(registration, created));
+                    }, creation -> {
+                        if (creation.failed()) {
+                            registrationFut.handle(creation.mapEmpty());
+                            return;
+                        }
+                        vertx.fileSystem().writeFile(domainAccountLocationFile, buffer(creation.result().getKey().getLocation().toASCIIString()), writing -> {
+                            if (writing.failed()) {
+                                registrationFut.fail(writing.cause());
+                                return;
+                            }
+                            logger.info("Domain account location file " + domainAccountLocationFile + " saved");
+                            registrationFut.complete(creation.result());
+                        });
                     });
                 }
-                fut.setHandler(ar -> {
-                    if (ar.failed()) {
-                        doneHandler.handle(ar.mapEmpty());
+                registrationFut.setHandler(registrationCombo -> {
+                    if (registrationCombo.failed()) {
+                        doneHandler.handle(registrationCombo.mapEmpty());
                     }
+                    final Registration registration = registrationCombo.result().getKey();
+                    final boolean created = registrationCombo.result().getValue();
                     String acceptedTermsLocationFile = dbPath + accountDbId + '-' + ACCEPTED_TERMS_LOCATION_FILE;
-                    String acceptedTermsLocation = "TODO";
-                    boolean contactsChanged = !created && !registration.getContacts().equals(asList(account.contactURIs).stream().map(this::toURI).collect(Collectors.toList()));
-                    boolean agreementChanged = created || !acceptedTermsLocation.equals(account.acceptedAgreementUrl);
-                    if (contactsChanged || agreementChanged) {
-                        Registration.EditableRegistration editableRegistration = registration.modify();
-                        List<URI> editableContacts = editableRegistration.getContacts();
-                        editableContacts.clear();
-                        for (String uri : contactURIs) {
-                            editableContacts.add(toURI(uri));
+                    vertx.fileSystem().exists(acceptedTermsLocationFile, (AsyncResult<Boolean> termsFileExists) -> {
+                        if (termsFileExists.failed()) {
+                            doneHandler.handle(termsFileExists.mapEmpty());
+                            return;
                         }
-                        editableRegistration.setAgreement(toURI(account.acceptedAgreementUrl));
-                        editableRegistration.commit();
-                    }
 
-                    doneHandler.handle(succeededFuture(registration));
+                        final Future<Boolean> agreementChangedFut;
+                        if (termsFileExists.result()) {
+                            agreementChangedFut = ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(acceptedTermsLocationFile, fut)).map(buf -> {
+                                String termsLocation = buf.toString();
+                                return !termsLocation.equals(account.acceptedAgreementUrl);
+                            });
+                        } else {
+                            agreementChangedFut = succeededFuture(true);
+                        }
+
+                        agreementChangedFut.setHandler(agreementChanged -> {
+                            if (agreementChanged.failed()) {
+                                doneHandler.handle(agreementChanged.mapEmpty());
+                                return;
+                            }
+                            String acceptedTermsLocation = "TODO";
+                            boolean contactsChanged = !created && !registration.getContacts().equals(asList(account.contactURIs).stream().map(this::toURI).collect(Collectors.toList()));
+                            if (contactsChanged || agreementChanged) {
+                                Registration.EditableRegistration editableRegistration = registration.modify();
+                                List<URI> editableContacts = editableRegistration.getContacts();
+                                editableContacts.clear();
+                                for (String uri : contactURIs) {
+                                    editableContacts.add(toURI(uri));
+                                }
+                                editableRegistration.setAgreement(toURI(account.acceptedAgreementUrl));
+                                editableRegistration.commit();
+                            }
+
+                            doneHandler.handle(succeededFuture(registration))
+                        });
+                    });
                 });
             });
         }
@@ -735,5 +783,11 @@ public class AcmeManager {
             }
             updateDone.handle(succeededFuture());
         });
+    }
+
+    static <T> Future<T> ff(Consumer<Future<T>> consumer) {
+        Future<T> fut = future();
+        consumer.accept(fut);
+        return fut;
     }
 }
