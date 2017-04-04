@@ -16,6 +16,7 @@
 package io.nitor.vertx.acme4j.tls;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.netty.util.concurrent.Promise;
 import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
 import io.nitor.vertx.acme4j.tls.AcmeConfig.Account;
 import io.vertx.core.*;
@@ -43,10 +44,12 @@ import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import static io.vertx.core.Future.failedFuture;
 import static io.vertx.core.Future.future;
 import static io.vertx.core.Future.succeededFuture;
+import static java.util.stream.Collectors.toList;
 
 public class AcmeManager {
 
@@ -78,20 +81,20 @@ public class AcmeManager {
     class AcmeConfigManager {
         public void update(final AcmeConfig oldC, final AcmeConfig newC, final Handler<AsyncResult<Void>> startArh) {
             newC.validate();
-            final AccountManager am = new AccountManager();
             final Future[] prevA = { succeededFuture() };
             mapDiff(oldC == null ? new HashMap<>() : oldC.accounts, newC.accounts,
                     (accountId, oldA, newA) -> {
+                        final AccountManager am = new AccountManager(accountId, oldA, newA);
                         final Future prev = prevA[0];
                         final Future<Void> cur = future();
-                        am.updateCached(accountId, oldA, newA, ar1 -> {
+                        am.updateCached(ar1 -> {
                             if (ar1.failed()) {
                                 logger.error("While handling account " + accountId, ar1.cause());
                                 prev.setHandler(cur);
                                 return;
                             }
                             prev.setHandler(dummy -> {
-                                am.updateOthers(accountId, oldA, newA, ar2 -> {
+                                am.updateOthers(ar2 -> {
                                     if (ar2.failed()) {
                                         logger.error("While handling account " + accountId, ar2.cause());
                                     }
@@ -105,17 +108,94 @@ public class AcmeManager {
         }
     }
     class AccountManager {
-        public void updateCached(String accountId, Account oldA, Account newA, Handler<AsyncResult<Void>> updateDone) {
-            updateDone.handle(succeededFuture());
+        final String accountId;
+        final Account oldAEvenIfDifferent;
+        Account oldA;
+        final Account newA;
+        final String oldAccountDbId;
+        final String newAccountDbId;
+
+        public AccountManager(String accountId, Account oldA, Account newA) {
+            this.accountId = accountId;
+            this.oldAEvenIfDifferent = oldA;
+            this.oldA = oldA;
+            this.newA = newA;
+            oldAccountDbId = accountDbIdFor(accountId, oldA);
+            newAccountDbId = accountDbIdFor(accountId, newA);
         }
 
-        public void updateOthers(String accountId, Account oldA, Account newA, Handler<AsyncResult<Void>> updateDone) {
-            final CertificateManager cm = new CertificateManager();
-            String oldAccountDbId = accountDbIdFor(accountId, oldA);
-            String newAccountDbId = accountDbIdFor(accountId, newA);
+        public void updateCached(Handler<AsyncResult<Void>> updateDone) {
+            Future<Void> oldAccDone = future();
             if (newA == null || !newAccountDbId.equals(oldAccountDbId)) {
                 // deregister all certificates for this account; account destruction should be handled in some other way
-                oldA.certificates.entrySet().forEach(e -> eh(() -> cm.update(null, accountId, e.getKey(), e.getValue(), null), "certificate " + e.getKey()));
+                List<Future> futures = oldAEvenIfDifferent.certificates.entrySet().stream().map(e -> {
+                    final CertificateManager cm = new CertificateManager(null, oldAccountDbId, e.getKey(), e.getValue(), null);
+                    Future fut = future();
+                    cm.updateCached(ar -> {
+                        if (ar.failed()) {
+                            fut.fail(new RuntimeException("For certificate " + e.getKey(), ar.cause()));
+                            return;
+                        }
+                        fut.succeeded();
+                    });
+                    return fut;
+                }).collect(Collectors.toList());
+                CompositeFuture.join(futures).setHandler(ar -> {
+                    CompositeFuture cf = ar.result();
+                    if (ar.failed()) {
+                        List<Throwable> collect = range(0, cf.size()).stream().filter(i -> cf.failed(i)).map(i -> cf.cause(i)).collect(toList());
+                        updateDone.handle(failedFuture(MultiException.wrapIfNeeded(collect)));
+                        return;
+                    }
+                    if (newA == null) {
+                        updateDone.handle(succeededFuture());
+                        return;
+                    }
+                    oldA = null;
+                    oldAccDone.complete();
+                });
+            } else {
+                oldAccDone.complete();
+            }
+
+            oldAccDone.setHandler(arrr -> {
+                mapDiff(oldA == null ? new HashMap<>() : oldA.certificates, newA.certificates,
+                        (certificateId, oldC, newC) -> {
+                    final CertificateManager cm = new CertificateManager(null, newAccountDbId, certificateId, oldC, newC);
+                    Future fut = future();
+                    cm.updateCached(ar -> {
+                        if (ar.failed()) {
+                            fut.fail(new RuntimeException("For certificate " + certificateId, ar.cause()));
+                            return;
+                        }
+                        fut.succeeded();
+                    });
+                    return fut;
+                }).collect(Collectors.toList());
+                CompositeFuture.join(futures).setHandler(ar -> {
+                    CompositeFuture cf = ar.result();
+                    if (ar.failed()) {
+                        List<Throwable> collect = range(0, cf.size()).stream().filter(i -> cf.failed(i)).map(i -> cf.cause(i)).collect(toList());
+                        updateDone.handle(failedFuture(MultiException.wrapIfNeeded(collect)));
+                        return;
+                    }
+                    if (newA == null) {
+                        updateDone.handle(succeededFuture());
+                        return;
+                    }
+                    oldA = null;
+                    oldAccDone.complete();
+                });
+
+                updateDone.handle(ar);
+            });
+        }
+
+        public void updateOthers(Handler<AsyncResult<Void>> updateDone) {
+            final CertificateManager cm = new CertificateManager();
+            if (newA == null || !newAccountDbId.equals(oldAccountDbId)) {
+                // deregister all certificates for this account; account destruction should be handled in some other way
+                oldAEvenIfDifferent.certificates.entrySet().forEach(e -> eh(() -> cm.update(null, accountId, e.getKey(), e.getValue(), null), "certificate " + e.getKey()));
                 if (newA == null) {
                     return;
                 }
@@ -138,7 +218,7 @@ public class AcmeManager {
                 }
                 logger.info("Session set up");
                 getOrCreateRegistration(newAccountDbId, newA, session, registration -> {
-                    if (registration.failed()) {
+                    if (registration.failed())      {
                         updateDone.handle(registration.mapEmpty());
                         return;
                     }
@@ -271,7 +351,24 @@ public class AcmeManager {
     }
 
     class CertificateManager {
-        public void update(Registration registration, String accountDbId, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) throws AcmeException, IOException, InterruptedException {
+        final Registration registration;
+        final String accountDbId;
+        final String certificateId;
+        final AcmeConfig.Certificate oldC;
+        final AcmeConfig.Certificate newC;
+
+        public CertificateManager(Registration registration, String accountDbId, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) {
+            this.registration = registration;
+            this.accountDbId = accountDbId;
+            this.certificateId = certificateId;
+            this.oldC = oldC;
+            this.newC = newC;
+        }
+
+        public void updateCached(Handler<AsyncResult<Void>> doneHandler) {
+
+        }
+        public void updateOthers(Handler<AsyncResult<Void>> doneHandler) {
             if (newC == null) {
                 // deregister certificate; certificate destruction should be handled in some other way
                 dynamicCertManager.remove(certificateId);
@@ -598,5 +695,26 @@ public class AcmeManager {
         } catch (Exception e) {
             throw new RuntimeException("While handling " + idDescription, e);
         }
+    }
+
+
+    /**
+     * @param begin inclusive
+     * @param end exclusive
+     * @return list of integers from begin to end
+     * @see https://stackoverflow.com/questions/371026/shortest-way-to-get-an-iterator-over-a-range-of-integers-in-java#6828887
+     */
+    public static List<Integer> range(final int begin, final int end) {
+        return new AbstractList<Integer>() {
+            @Override
+            public Integer get(int index) {
+                return begin + index;
+            }
+
+            @Override
+            public int size() {
+                return end - begin;
+            }
+        };
     }
 }
