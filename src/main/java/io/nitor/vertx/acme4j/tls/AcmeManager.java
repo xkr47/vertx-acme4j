@@ -47,6 +47,7 @@ import java.util.AbstractMap.SimpleEntry;
 import java.util.Map.Entry;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -90,14 +91,14 @@ public class AcmeManager {
                     .map((account) -> (Function<Future<Void>, Future<Void>>) prev -> {
                         final AccountManager am = new AccountManager(account.key, account.oldValue, account.newValue);
                         final Future<Void> cur = future();
-                        am.updateCached(ar1 -> {
+                        am.updateCached().setHandler(ar1 -> {
                             if (ar1.failed()) {
                                 logger.error("While handling account " + account.key, ar1.cause());
                                 prev.setHandler(cur);
                                 return;
                             }
                             prev.setHandler(prevResult -> {
-                                am.updateOthers(ar2 -> {
+                                am.updateOthers().setHandler(ar2 -> {
                                     if (ar2.failed()) {
                                         logger.error("While handling account " + account.key, ar2.cause());
                                         cur.fail("Some account(s) failed");
@@ -131,31 +132,26 @@ public class AcmeManager {
             newAccountDbId = accountDbIdFor(accountId, newA);
         }
 
-        public void updateCached(final Handler<AsyncResult<Void>> updateDone) {
+        public Future<Void> updateCached() {
             if (newAOrig == null || !newAccountDbId.equals(oldAccountDbId)) {
                 // deregister all certificates for old account; account destruction should be handled in some other way
-                updateCached2(oldAccountDbId, oldAOrig, null, ar -> {
-                    if (ar.failed()) {
-                        updateDone.handle(ar);
-                        return;
-                    }
-                    // register all certificates for new account
-                    updateCached2(newAccountDbId, null, newAOrig, updateDone);
-                });
+                return updateCached2(oldAccountDbId, oldAOrig, null)
+                        // register all certificates for new account
+                        .compose(v -> updateCached2(newAccountDbId, null, newAOrig));
             } else {
                 // update all certificates for same account
-                updateCached2(newAccountDbId, oldAOrig, newAOrig, updateDone);
+                return updateCached2(newAccountDbId, oldAOrig, newAOrig);
             }
         }
 
-        private void updateCached2(String accountDbId, Account oldA, Account newA, Handler<AsyncResult<Void>> updateDone) {
+        private Future<Void> updateCached2(String accountDbId, Account oldA, Account newA) {
             Map<String, AcmeConfig.Certificate> oldCs = oldA == null ? new HashMap<>() : oldA.certificates;
             Map<String, AcmeConfig.Certificate> newCs = newA == null ? new HashMap<>() : newA.certificates;
-            List<Future> futures = mapDiff(oldCs, newCs)
+            List<Future<?>> futures = mapDiff(oldCs, newCs)
                     .stream()
                     .map((certificate) -> {
                         final CertificateManager cm = new CertificateManager(null, accountDbId, certificate.key, certificate.oldValue, certificate.newValue);
-                        Future fut = future();
+                        Future<?> fut = future();
                         cm.updateCached(ar -> {
                             if (ar.failed()) {
                                 fut.fail(new RuntimeException("For certificate " + certificate.key, ar.cause()));
@@ -165,31 +161,27 @@ public class AcmeManager {
                         });
                         return fut;
                     }).collect(Collectors.toList());
-            join(futures, updateDone);
+            return join(futures);
         }
 
-        public void updateOthers(final Handler<AsyncResult<Void>> updateDone) {
+        public Future<Void> updateOthers() {
             if (newAOrig == null || !newAccountDbId.equals(oldAccountDbId)) {
                 /*// deregister all certificates for old account; account destruction should be handled in some other way
                 updateOthers2(oldAccountDbId, oldAOrig, null, ar -> {
-                    if (ar.failed()) {
-                        updateDone.handle(ar);
-                        return;
-                    }
                     */
                     // register all certificates for new account
-                    updateOthers2(null, updateDone);
+                    return updateOthers2(null);
                 /*
                 });
                  */
             } else {
                 // update all certificates for same account
-                updateOthers2(oldAOrig, updateDone);
+                return updateOthers2(oldAOrig);
             }
         }
 
-        public void updateOthers2(Account oldA, Handler<AsyncResult<Void>> updateDone) {
-            ff((Future<KeyPair> fut) -> getOrCreateAccountKeyPair(newAccountDbId, fut)).compose(accountKeyPair -> {
+        public Future<Void> updateOthers2(Account oldA) {
+            return getOrCreateAccountKeyPair(newAccountDbId).compose(accountKeyPair -> {
                 Session session;
                 try {
                     session = new Session(new URI(newAOrig.providerUrl), accountKeyPair);
@@ -229,7 +221,7 @@ public class AcmeManager {
                             }).collect(Collectors.toList());
                     return join(futures);
                 });
-            }).setHandler(updateDone);
+            });
         }
 
         private String accountDbIdFor(String accountId, Account account) {
@@ -240,55 +232,30 @@ public class AcmeManager {
             }
         }
 
-        private void getOrCreateAccountKeyPair(String accountDbId, Handler<AsyncResult<KeyPair>> doneHandler) {
+        private Future<KeyPair> getOrCreateAccountKeyPair(String accountDbId) {
             String domainKeyPairFile = dbPath + accountDbId + '-' + DOMAIN_KEY_PAIR_FILE;
-            getOrCreateKeyPair(domainKeyPairFile, doneHandler, createHandler -> AsyncKeyPairUtils.createKeyPair(vertx, 4096, createHandler));
+            return getOrCreateKeyPair(domainKeyPairFile, () -> ff((Future<KeyPair> fut) -> AsyncKeyPairUtils.createKeyPair(vertx, 4096, fut)));
+            //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
         }
 
-        private void getOrCreateKeyPair(final String keyPairFile, final Handler<AsyncResult<KeyPair>> doneHandler, final Consumer<Handler<AsyncResult<KeyPair>>> creator) {
-            vertx.fileSystem().exists(keyPairFile, (AsyncResult<Boolean> keyFileExists) -> {
-                if (keyFileExists.failed()) {
-                    // file check failed
-                    doneHandler.handle(keyFileExists.mapEmpty());
-                    return;
-                }
-                if (keyFileExists.result()) {
+        private Future<KeyPair> getOrCreateKeyPair(final String keyPairFile, final Supplier<Future<KeyPair>> creator) {
+            return ff((Future<Boolean> fut) -> vertx.fileSystem().exists(keyPairFile, fut)).compose(keyFileExists -> {
+                if (keyFileExists) {
                     // file exists
-                    vertx.fileSystem().readFile(keyPairFile, existingKeyFile -> {
-                        if (existingKeyFile.failed()) {
-                            doneHandler.handle(existingKeyFile.mapEmpty());
-                            return;
-                        }
-                        AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile.result(), readKeyPair -> {
-                            if (readKeyPair.succeeded()) {
+                    return ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(keyPairFile, fut))
+                            .compose(existingKeyFile -> ff((Future<KeyPair> fut) -> AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile, fut)))
+                            .map((KeyPair readKeyPair) -> {
                                 logger.info("Existing account keypair read from " + keyPairFile);
-                            }
-                            doneHandler.handle(readKeyPair);
-                        });
-                    });
+                                return readKeyPair;
+                            });
                 } else {
                     // file doesn't exist
-                    creator.accept(createdKeyPair -> {
-                        //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
-                        if (createdKeyPair.failed()) {
-                            doneHandler.handle(createdKeyPair.mapEmpty());
-                            return;
-                        }
-                        AsyncKeyPairUtils.writeKeyPair(vertx, createdKeyPair.result(), keyPairSerialized -> {
-                            if (keyPairSerialized.failed()) {
-                                doneHandler.handle(keyPairSerialized.mapEmpty());
-                                return;
-                            }
-                            vertx.fileSystem().writeFile(keyPairFile, keyPairSerialized.result(), ar3 -> {
-                                if (ar3.failed()) {
-                                    doneHandler.handle(ar3.mapEmpty());
-                                    return;
-                                }
+                    return creator.get().compose(createdKeyPair -> ff((Future<Buffer> fut) -> AsyncKeyPairUtils.writeKeyPair(vertx, createdKeyPair, fut))
+                            .compose(keyPairSerialized -> ff((Future<Void> fut) -> vertx.fileSystem().writeFile(keyPairFile, keyPairSerialized, fut)))
+                            .map(v -> {
                                 logger.info("New account keypair written to " + keyPairFile);
-                                doneHandler.handle(succeededFuture(createdKeyPair.result()));
-                            });
-                        });
-                    });
+                                return createdKeyPair;
+                            }));
                 }
             });
         }
