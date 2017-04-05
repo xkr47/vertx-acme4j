@@ -53,6 +53,7 @@ import java.util.stream.IntStream;
 
 import static io.vertx.core.Future.*;
 import static io.vertx.core.buffer.Buffer.buffer;
+import static java.util.Arrays.asList;
 import static java.util.stream.Collectors.toList;
 
 public class AcmeManager {
@@ -151,15 +152,7 @@ public class AcmeManager {
                     .stream()
                     .map((certificate) -> {
                         final CertificateManager cm = new CertificateManager(null, accountDbId, certificate.key, certificate.oldValue, certificate.newValue);
-                        Future<?> fut = future();
-                        cm.updateCached(ar -> {
-                            if (ar.failed()) {
-                                fut.fail(new RuntimeException("For certificate " + certificate.key, ar.cause()));
-                                return;
-                            }
-                            fut.complete();
-                        });
-                        return fut;
+                        return cm.updateCached().recover(t -> failedFuture(new RuntimeException("For certificate " + certificate.key, t)));
                     }).collect(Collectors.toList());
             return join(futures);
         }
@@ -339,7 +332,6 @@ public class AcmeManager {
                             fut.fail(e);
                         }
                     });
-
                 });
             });
         }
@@ -360,10 +352,7 @@ public class AcmeManager {
             this.newC = newC;
         }
 
-        public void updateCached(Handler<AsyncResult<Void>> doneHandler) {
-
-        }
-        public void updateOthers(Handler<AsyncResult<Void>> doneHandler) {
+        public Future<Void> updateCached() {
             if (newC == null) {
                 // deregister certificate; certificate destruction should be handled in some other way
                 dynamicCertManager.remove(certificateId);
@@ -372,12 +361,26 @@ public class AcmeManager {
             String privateKeyFile = dbPath + accountDbId + "-" + certificateId + "-key.pem";
             String certificateFile = dbPath + accountDbId + "-" + certificateId + "-certchain.pem";
 
-            if (vertx.fileSystem().existsBlocking(certificateFile) && vertx.fileSystem().existsBlocking(privateKeyFile)) {
-                X509Certificate[] certChain = PemLoader.loadCerts(vertx.fileSystem().readFileBlocking(certificateFile));
-                PrivateKey privateKey = PemLoader.loadPrivateKey(vertx.fileSystem().readFileBlocking(privateKeyFile));
-                // TODO
-            }
+            Future<Boolean> certificateFileExists = ff((Future<Boolean> fut) -> vertx.fileSystem().exists(certificateFile, fut));
+            Future<Boolean> privateKeyFileExists = ff((Future<Boolean> fut) -> vertx.fileSystem().exists(privateKeyFile, fut));
+            return join(asList(certificateFileExists, privateKeyFileExists)).compose(x -> {
+                if (certificateFileExists.result() != privateKeyFileExists.result()) {
+                    // TODO perhaps just ignore them instead and re-fetch?
+                    return failedFuture("Either " + privateKeyFile + " or " + certificateFile + " is missing");
+                }
+                return certificateFileExists;
+            }).compose(filesExist -> {
+                Future<Buffer> certificateFut = ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(certificateFile, fut));
+                Future<Buffer> privateKeyFut = ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(privateKeyFile, fut));
+                return join(asList(certificateFileExists, privateKeyFileExists)).compose(x -> executeBlocking((Future<Void> fut) -> {
+                    X509Certificate[] certChain = PemLoader.loadCerts(certificateFut.result());
+                    PrivateKey privateKey = PemLoader.loadPrivateKey(privateKeyFut.result());
+                    dynamicCertManager.put(certificateId, privateKey, certChain);
+                }));
+            });
+        }
 
+        public void updateOthers(Handler<AsyncResult<Void>> doneHandler) {
             logger.info("Domains to authorize: {}", newC.hostnames);
             for (String domainName : newC.hostnames) {
                 logger.info("Authorizing domain {}", domainName);
