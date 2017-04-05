@@ -260,38 +260,28 @@ public class AcmeManager {
             });
         }
 
-        private void getOrCreateRegistration(String accountDbId, Account account, Session session, Handler<AsyncResult<Registration>> doneHandler) {
+        private Future<Registration> getOrCreateRegistration(String accountDbId, Account account, Session session) {
             // TODO update registration when agreement, contact or others change (save to file what were last used values)
             String domainAccountLocationFile = dbPath + accountDbId + '-' + DOMAIN_ACCOUNT_LOCATION_FILE;
-            vertx.fileSystem().exists(domainAccountLocationFile, (AsyncResult<Boolean> keyFileExists) -> {
-                if (keyFileExists.failed()) {
-                    doneHandler.handle(keyFileExists.mapEmpty());
-                    return;
-                }
-                final String[] contactURIs = account.contactURIs == null ? new String[0] : account.contactURIs;
-                final Future<Entry<Registration, Boolean>> registrationFut = future();
-                if (keyFileExists.result()) {
+            final List<String> contactURIs = account.contactURIs == null ? Collections.emptyList() : account.contactURIs;
+            return ff((Future<Boolean> fut) -> vertx.fileSystem().exists(domainAccountLocationFile, fut)).compose((Boolean keyFileExists) -> {
+                if (keyFileExists) {
                     logger.info("Domain account location file " + domainAccountLocationFile + " exists, using..");
-                    vertx.fileSystem().readFile(domainAccountLocationFile, domainAccountLocation -> {
-                        if (domainAccountLocation.failed()) {
-                            registrationFut.fail(domainAccountLocation.cause());
-                            return;
-                        }
-                        String locationStr = domainAccountLocation.result().toString();
+                    return ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(domainAccountLocationFile, fut)).compose(domainAccountLocation -> {
+                        String locationStr = domainAccountLocation.toString();
                         logger.info("Domain account location: " + locationStr);
                         URI location;
                         try {
                             location = new URI(locationStr);
                         } catch (URISyntaxException e) {
-                            registrationFut.fail(e);
-                            return;
+                            return failedFuture(e);
                         }
                         Registration registration = Registration.bind(session, location);
                         logger.info("Registration successfully bound");
-                        registrationFut.complete(new SimpleEntry<>(registration, false));
+                        return succeededFuture(new SimpleEntry<>(registration, false));
                     });
                 } else {
-                    vertx.executeBlocking((Future<Entry<Registration, Boolean>> createFut) -> {
+                    return executeBlocking((Future<Entry<Registration, Boolean>> createFut) -> {
                         logger.info("No domain account location file, attempting to create new registration");
                         RegistrationBuilder builder = new RegistrationBuilder();
                         for (String uri : contactURIs) {
@@ -312,65 +302,44 @@ public class AcmeManager {
                             return;
                         }
                         createFut.complete(new SimpleEntry<>(registration, created));
-                    }, creation -> {
-                        if (creation.failed()) {
-                            registrationFut.handle(creation.mapEmpty());
-                            return;
-                        }
-                        vertx.fileSystem().writeFile(domainAccountLocationFile, buffer(creation.result().getKey().getLocation().toASCIIString()), writing -> {
-                            if (writing.failed()) {
-                                registrationFut.fail(writing.cause());
-                                return;
-                            }
-                            logger.info("Domain account location file " + domainAccountLocationFile + " saved");
-                            registrationFut.complete(creation.result());
-                        });
-                    });
+                    }).compose(creation -> ff((Future<Void> fut) ->
+                            vertx.fileSystem().writeFile(domainAccountLocationFile, buffer(creation.getKey().getLocation().toASCIIString()), fut))
+                            .map(v -> {
+                                logger.info("Domain account location file " + domainAccountLocationFile + " saved");
+                                return creation;
+                            }));
                 }
-                registrationFut.setHandler(registrationCombo -> {
-                    if (registrationCombo.failed()) {
-                        doneHandler.handle(registrationCombo.mapEmpty());
+            }).compose(registrationCombo -> {
+                final Registration registration = registrationCombo.getKey();
+                final boolean created = registrationCombo.getValue();
+                String acceptedTermsLocationFile = dbPath + accountDbId + '-' + ACCEPTED_TERMS_LOCATION_FILE;
+                boolean contactsChanged = !created && !registration.getContacts().equals(account.contactURIs.stream().map(URI::create).collect(Collectors.toList()));
+                return (contactsChanged || created ? succeededFuture(true) :
+                        ff((Future<Boolean> fut) -> vertx.fileSystem().exists(acceptedTermsLocationFile, fut)).compose(termsFileExists ->
+                                !termsFileExists ? succeededFuture(true) :
+                                        ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(acceptedTermsLocationFile, fut)).map(buf ->
+                                                !buf.toString().equals(account.acceptedAgreementUrl)))
+                ).compose(registrationPropsChanged -> {
+                    if (!registrationPropsChanged) {
+                        return succeededFuture(registration);
                     }
-                    final Registration registration = registrationCombo.result().getKey();
-                    final boolean created = registrationCombo.result().getValue();
-                    String acceptedTermsLocationFile = dbPath + accountDbId + '-' + ACCEPTED_TERMS_LOCATION_FILE;
-                    vertx.fileSystem().exists(acceptedTermsLocationFile, (AsyncResult<Boolean> termsFileExists) -> {
-                        if (termsFileExists.failed()) {
-                            doneHandler.handle(termsFileExists.mapEmpty());
-                            return;
+                    Registration.EditableRegistration editableRegistration = registration.modify();
+                    List<URI> editableContacts = editableRegistration.getContacts();
+                    editableContacts.clear();
+                    for (String uri : contactURIs) {
+                        editableContacts.add(URI.create(uri));
+                    }
+                    editableRegistration.setAgreement(URI.create(account.acceptedAgreementUrl));
+                    return executeBlocking(fut -> {
+                        try {
+                            editableRegistration.commit();
+                            vertx.fileSystem().writeFile(acceptedTermsLocationFile, buffer(account.acceptedAgreementUrl), ar ->
+                                    fut.handle(ar.map(registration)));
+                        } catch (AcmeException e) {
+                            fut.fail(e);
                         }
-
-                        final Future<Boolean> agreementChangedFut;
-                        if (termsFileExists.result()) {
-                            agreementChangedFut = ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(acceptedTermsLocationFile, fut)).map(buf -> {
-                                String termsLocation = buf.toString();
-                                return !termsLocation.equals(account.acceptedAgreementUrl);
-                            });
-                        } else {
-                            agreementChangedFut = succeededFuture(true);
-                        }
-
-                        agreementChangedFut.setHandler(agreementChanged -> {
-                            if (agreementChanged.failed()) {
-                                doneHandler.handle(agreementChanged.mapEmpty());
-                                return;
-                            }
-                            String acceptedTermsLocation = "TODO";
-                            boolean contactsChanged = !created && !registration.getContacts().equals(asList(account.contactURIs).stream().map(this::toURI).collect(Collectors.toList()));
-                            if (contactsChanged || agreementChanged) {
-                                Registration.EditableRegistration editableRegistration = registration.modify();
-                                List<URI> editableContacts = editableRegistration.getContacts();
-                                editableContacts.clear();
-                                for (String uri : contactURIs) {
-                                    editableContacts.add(toURI(uri));
-                                }
-                                editableRegistration.setAgreement(toURI(account.acceptedAgreementUrl));
-                                editableRegistration.commit();
-                            }
-
-                            doneHandler.handle(succeededFuture(registration))
-                        });
                     });
+
                 });
             });
         }
@@ -583,7 +552,7 @@ public class AcmeManager {
         });
     }
 
-    enum State { NOT_STARTED, UPDATING, OK, FAILED };
+    enum State { NOT_STARTED, UPDATING, OK, FAILED }
 
     private State state = State.NOT_STARTED;
 
@@ -771,5 +740,9 @@ public class AcmeManager {
         Future<T> fut = future();
         consumer.accept(fut);
         return fut;
+    }
+
+    <T> Future<T> executeBlocking(Handler<Future<T>> blockingHandler) {
+        return ff((Future<T> fut) -> vertx.executeBlocking(blockingHandler, fut));
     }
 }
