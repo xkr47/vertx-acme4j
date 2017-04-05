@@ -234,7 +234,7 @@ public class AcmeManager {
 
         private Future<KeyPair> getOrCreateAccountKeyPair(String accountDbId) {
             String domainKeyPairFile = dbPath + accountDbId + '-' + DOMAIN_KEY_PAIR_FILE;
-            return getOrCreateKeyPair(domainKeyPairFile, () -> ff((Future<KeyPair> fut) -> AsyncKeyPairUtils.createKeyPair(vertx, 4096, fut)));
+            return getOrCreateKeyPair(domainKeyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
             //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
         }
 
@@ -243,14 +243,14 @@ public class AcmeManager {
                 if (keyFileExists) {
                     // file exists
                     return ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(keyPairFile, fut))
-                            .compose(existingKeyFile -> ff((Future<KeyPair> fut) -> AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile, fut)))
+                            .compose(existingKeyFile -> AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile))
                             .map((KeyPair readKeyPair) -> {
                                 logger.info("Existing account keypair read from " + keyPairFile);
                                 return readKeyPair;
                             });
                 } else {
                     // file doesn't exist
-                    return creator.get().compose(createdKeyPair -> ff((Future<Buffer> fut) -> AsyncKeyPairUtils.writeKeyPair(vertx, createdKeyPair, fut))
+                    return creator.get().compose(createdKeyPair -> AsyncKeyPairUtils.writeKeyPair(vertx, createdKeyPair)
                             .compose(keyPairSerialized -> ff((Future<Void> fut) -> vertx.fileSystem().writeFile(keyPairFile, keyPairSerialized, fut)))
                             .map(v -> {
                                 logger.info("New account keypair written to " + keyPairFile);

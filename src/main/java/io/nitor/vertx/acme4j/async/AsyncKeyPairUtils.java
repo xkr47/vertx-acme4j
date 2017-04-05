@@ -16,6 +16,7 @@
 package io.nitor.vertx.acme4j.async;
 
 import io.vertx.core.AsyncResult;
+import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
@@ -26,24 +27,31 @@ import java.io.StringReader;
 import java.io.StringWriter;
 import java.security.KeyPair;
 
+import static io.vertx.core.Future.future;
+
 public class AsyncKeyPairUtils {
-    public static void createKeyPair(Vertx vertx, int keysize, Handler<AsyncResult<KeyPair>> handler) {
+    public static Future<KeyPair> createKeyPair(Vertx vertx, int keysize) {
+        Future<KeyPair> res = future();
         vertx.executeBlocking(fut -> {
             fut.complete(KeyPairUtils.createKeyPair(keysize));
-        }, handler);
+        }, res);
+        return res;
     }
 
-    public static void readKeyPair(Vertx vertx, Buffer buf, Handler<AsyncResult<KeyPair>> handler) {
+    public static Future<KeyPair> readKeyPair(Vertx vertx, Buffer buf) {
+        Future<KeyPair> res = future();
         vertx.executeBlocking(fut -> {
             try {
                 fut.complete(KeyPairUtils.readKeyPair(new StringReader(buf.toString())));
             } catch (IOException e) {
                 fut.fail(e);
             }
-        }, handler);
+        }, res);
+        return res;
     }
 
-    public static void writeKeyPair(Vertx vertx, KeyPair keyPair, Handler<AsyncResult<Buffer>> handler) {
+    public static Future<Buffer> writeKeyPair(Vertx vertx, KeyPair keyPair) {
+        Future<Buffer> res = future();
         vertx.executeBlocking(fut -> {
             try {
                 StringWriter sw = new StringWriter();
@@ -52,6 +60,7 @@ public class AsyncKeyPairUtils {
             } catch (IOException e) {
                 fut.fail(e);
             }
-        }, handler);
+        }, res);
+        return res;
     }
 }
