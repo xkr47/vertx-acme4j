@@ -182,35 +182,14 @@ public class AcmeManager {
                     return failedFuture(e);
                 }
                 logger.info(accountId + ": Session set up");
-                return ff((Future<Registration> fut) -> getOrCreateRegistration(newAccountDbId, newAOrig, session, fut)).compose(registration -> {
+                return getOrCreateRegistration(newAccountDbId, newAOrig, session).compose(registration -> {
                     Map<String, AcmeConfig.Certificate> oldCs = oldA == null ? new HashMap<>() : oldA.certificates;
                     Map<String, AcmeConfig.Certificate> newCs = newAOrig == null ? new HashMap<>() : newAOrig.certificates;
                     List<Future<?>> futures = mapDiff(oldCs, newCs)
                             .stream()
                             .map((certificate) -> {
                                 final CertificateManager cm = new CertificateManager(registration, newAccountDbId, certificate.key, certificate.oldValue, certificate.newValue);
-                                Future<?> fut = future();
-                                cm.updateOthers(ar -> {
-                                    if (ar.failed()) {
-                                        /*
-                                        if (ar.cause() instanceof AcmeUnauthorizedException) {
-                                            // TODO update terms&cond
-                                            cm.updateOthers(ar2 -> {
-                                                if (ar2.failed()) {
-                                                    fut.fail(new RuntimeException("For certificate " + certificate.key, ar2.cause()));
-                                                    return;
-                                                }
-                                                fut.complete();
-                                            });
-                                            return;
-                                        }
-                                        */
-                                        fut.fail(new RuntimeException("For certificate " + certificate.key, ar.cause()));
-                                        return;
-                                    }
-                                    fut.complete();
-                                });
-                                return fut;
+                                return cm.updateOthers().recover(t -> failedFuture(new RuntimeException("For certificate " + certificate.key, t)));
                             }).collect(Collectors.toList());
                     return join(futures);
                 });
@@ -343,6 +322,10 @@ public class AcmeManager {
         final String certificateId;
         final AcmeConfig.Certificate oldC;
         final AcmeConfig.Certificate newC;
+        final String privateKeyFile;
+        final String certificateFile;
+        final Future<Boolean> certificateFileExists;
+        final Future<Boolean> privateKeyFileExists;
 
         public CertificateManager(Registration registration, String accountDbId, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) {
             this.registration = registration;
@@ -350,6 +333,10 @@ public class AcmeManager {
             this.certificateId = certificateId;
             this.oldC = oldC;
             this.newC = newC;
+            privateKeyFile = dbPath + accountDbId + "-" + certificateId + "-key.pem";
+            certificateFile = dbPath + accountDbId + "-" + certificateId + "-certchain.pem";
+            certificateFileExists = ff((Future<Boolean> fut) -> vertx.fileSystem().exists(certificateFile, fut));
+            privateKeyFileExists = ff((Future<Boolean> fut) -> vertx.fileSystem().exists(privateKeyFile, fut));
         }
 
         public Future<Void> updateCached() {
@@ -357,19 +344,13 @@ public class AcmeManager {
                 // deregister certificate; certificate destruction should be handled in some other way
                 dynamicCertManager.remove(certificateId);
             }
-
-            String privateKeyFile = dbPath + accountDbId + "-" + certificateId + "-key.pem";
-            String certificateFile = dbPath + accountDbId + "-" + certificateId + "-certchain.pem";
-
-            Future<Boolean> certificateFileExists = ff((Future<Boolean> fut) -> vertx.fileSystem().exists(certificateFile, fut));
-            Future<Boolean> privateKeyFileExists = ff((Future<Boolean> fut) -> vertx.fileSystem().exists(privateKeyFile, fut));
             return join(asList(certificateFileExists, privateKeyFileExists)).compose(x -> {
-                if (certificateFileExists.result() != privateKeyFileExists.result()) {
-                    // TODO perhaps just ignore them instead and re-fetch?
-                    return failedFuture("Either " + privateKeyFile + " or " + certificateFile + " is missing");
-                }
-                return certificateFileExists;
+                return succeededFuture(certificateFileExists.result() && privateKeyFileExists.result());
+                //return failedFuture("Either " + privateKeyFile + " or " + certificateFile + " is missing");
             }).compose(filesExist -> {
+                if (!filesExist) {
+                    return succeededFuture();
+                }
                 Future<Buffer> certificateFut = ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(certificateFile, fut));
                 Future<Buffer> privateKeyFut = ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(privateKeyFile, fut));
                 return join(asList(certificateFileExists, privateKeyFileExists)).compose(x -> executeBlocking((Future<Void> fut) -> {
@@ -380,7 +361,11 @@ public class AcmeManager {
             });
         }
 
-        public void updateOthers(Handler<AsyncResult<Void>> doneHandler) {
+        public Future<Void> updateOthers() {
+            boolean gotCerts = certificateFileExists.result() && privateKeyFileExists.result();
+            if (gotCerts && oldC.equals(newC)) {
+                return succeededFuture();
+            }
             logger.info("Domains to authorize: {}", newC.hostnames);
             for (String domainName : newC.hostnames) {
                 logger.info("Authorizing domain {}", domainName);
