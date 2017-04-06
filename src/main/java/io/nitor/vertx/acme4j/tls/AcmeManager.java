@@ -37,6 +37,7 @@ import org.shredzone.acme4j.util.CertificateUtils;
 import org.shredzone.acme4j.util.KeyPairUtils;
 
 import java.io.*;
+import java.net.Authenticator;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
@@ -131,6 +132,8 @@ public class AcmeManager {
         final Account newAOrig;
         final String oldAccountDbId;
         final String newAccountDbId;
+        Map<String, Authorization> authorizations;
+        Registration registration;
 
         public AccountManager(String accountId, Account oldA, Account newA) {
             this.accountId = accountId;
@@ -158,7 +161,7 @@ public class AcmeManager {
             List<Future<?>> futures = mapDiff(oldCs, newCs)
                     .stream()
                     .map((certificate) -> {
-                        final CertificateManager cm = new CertificateManager(null, accountDbId, certificate.key, certificate.oldValue, certificate.newValue);
+                        final CertificateManager cm = new CertificateManager(null, accountDbId, newA.minimumValidityDays, null, certificate.key, certificate.oldValue, certificate.newValue);
                         return cm.updateCached().recover(t -> failedFuture(new RuntimeException("For certificate " + certificate.key, t)));
                     }).collect(Collectors.toList());
             return join(futures);
@@ -190,17 +193,31 @@ public class AcmeManager {
                 }
                 logger.info(accountId + ": Session set up");
                 return getOrCreateRegistration(newAccountDbId, newAOrig, session).compose(registration -> {
+                    this.registration = registration;
                     Map<String, AcmeConfig.Certificate> oldCs = oldA == null ? new HashMap<>() : oldA.certificates;
                     Map<String, AcmeConfig.Certificate> newCs = newAOrig == null ? new HashMap<>() : newAOrig.certificates;
                     List<Future<?>> futures = mapDiff(oldCs, newCs)
                             .stream()
                             .map((certificate) -> {
-                                final CertificateManager cm = new CertificateManager(registration, newAccountDbId, certificate.key, certificate.oldValue, certificate.newValue);
+                                final CertificateManager cm = new CertificateManager(registration, newAccountDbId, newAOrig.minimumValidityDays, this::getAuthorization, certificate.key, certificate.oldValue, certificate.newValue);
                                 return cm.updateOthers().recover(t -> failedFuture(new RuntimeException("For certificate " + certificate.key, t)));
                             }).collect(Collectors.toList());
                     return join(futures);
                 });
             });
+        }
+
+        private Authorization getAuthorization(String domain) {
+            if (authorizations == null) {
+                authorizations = new AbstractCollection<Authorization>registration.getAuthorizations();
+                St
+            }
+            Authorization authorization = authorizations.get(domain);
+            if (authorization == null) {
+                if (!authorizationsRetrieved) {
+
+                }
+            }
         }
 
         private String accountDbIdFor(String accountId, Account account) {
@@ -333,7 +350,7 @@ public class AcmeManager {
         final String privateKeyFile;
         final String certificateFile;
 
-        public CertificateManager(Registration registration, String accountDbId, int minimumValidityDays, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) {
+        public CertificateManager(Registration registration, String accountDbId, int minimumValidityDays, Function<String, Authorization> getAuthorization, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) {
             this.registration = registration;
             this.accountDbId = accountDbId;
             this.minimumValidityDays = minimumValidityDays;
@@ -378,9 +395,9 @@ public class AcmeManager {
             // has the config changed
             // is the certificate still valid
             // are the authorizations still valid
-
-            boolean gotCerts = certificateFileExists.result() && privateKeyFileExists.result();
-            boolean certificateValidEnough = false;
+            if (newC == null) {
+                return succeededFuture();
+            }
             if (oldC.equals(newC)) {
                 // certificate is configuration-wise up-to-date
                 CertCombo certCombo = dynamicCertManager.get(certificateId);
@@ -388,15 +405,18 @@ public class AcmeManager {
                     X509Certificate cert = (X509Certificate) certCombo.certWithChain[0];
                     try {
                         cert.checkValidity(new Date(currentTimeMillis() + DAYS.toMillis(minimumValidityDays)));
-                        certificateValidEnough = true;
-                    } catch (CertificateException e) {
-                        // not valid
+                        return succeededFuture();
+                    } catch (CertificateNotYetValidException e) {
+                        return failedFuture(new RuntimeException("Unexpected certificate validity period", e));
+                    } catch (CertificateExpiredException e) {
+                        // not valid anymore in <minimumValidityDays> days, request new
                     }
                 }
             }
             logger.info("Domains to authorize: {}", newC.hostnames);
             for (String domainName : newC.hostnames) {
                 logger.info("Authorizing domain {}", domainName);
+                registration.getAuthorizations()
                 Authorization auth;
                 //try {
                     auth = registration.authorizeDomain(domainName);
