@@ -648,16 +648,6 @@ public class AcmeManager {
     */
 
 
-    public interface Read<T> {
-        T read(BufferedReader r) throws IOException;
-    }
-
-    private static <T> T read(String file, Read<T> read) throws IOException {
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(file), "UTF-8"))) {
-            return read.read(r);
-        }
-    }
-
     public interface Write {
         void write(Writer w) throws IOException;
     }
@@ -698,31 +688,6 @@ public class AcmeManager {
             this.oldValue = oldValue;
             this.newValue = newValue;
         }
-    }
-
-    @FunctionalInterface
-    public interface CheckedProcedure {
-        void call() throws Exception;
-    }
-
-    static void eh(CheckedProcedure c, String idDescription) {
-        try {
-            c.call();
-        } catch (Exception e) {
-            throw new RuntimeException("While handling " + idDescription, e);
-        }
-    }
-
-    static void join(List<Future> futures, Handler<AsyncResult<Void>> updateDone) {
-        CompositeFuture.join(futures).setHandler(ar -> {
-            CompositeFuture cf = (CompositeFuture)ar; // uggggh
-            if (cf.failed()) {
-                List<Throwable> collect = IntStream.range(0, cf.size()).filter(i -> cf.failed(i)).mapToObj(i -> cf.cause(i)).collect(toList());
-                updateDone.handle(failedFuture(MultiException.wrapIfNeeded(collect)));
-                return;
-            }
-            updateDone.handle(succeededFuture());
-        });
     }
 
     static Future<Void> join(List<Future<?>> futures) {
