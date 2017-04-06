@@ -72,6 +72,10 @@ public class DynamicCertManager {
         put(new CertCombo(id, key, certWithChain));
     }
 
+    public CertCombo get(String certificateId) {
+        return map.get(certificateId);
+    }
+
     public synchronized void put(CertCombo cc) {
         CertCombo old = map.put(cc.id, cc);
         logger.info((old != null ? "Replacing" : "Installing") + " cert for " + cc.id);

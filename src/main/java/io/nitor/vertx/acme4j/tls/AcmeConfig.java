@@ -48,11 +48,13 @@ public class AcmeConfig extends Struct {
         public String providerUrl;
         public String acceptedAgreementUrl;
         public List<String> contactURIs;
+        public int minimumValidityDays;
         public Map<String, Certificate> certificates;
 
         public void validate() {
             if (!enabled) return;
             if (providerUrl == null || providerUrl.isEmpty()) throw new NullPointerException("providerUrl");
+            if (minimumValidityDays < 1) throw new IllegalArgumentException("minimumValidityDays must be greater than zero");
             if (certificates == null) throw new NullPointerException("certificates");
             certificates.values().stream().forEach(Certificate::validate);
         }

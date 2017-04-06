@@ -18,6 +18,7 @@ package io.nitor.vertx.acme4j.tls;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
 import io.nitor.vertx.acme4j.tls.AcmeConfig.Account;
+import io.nitor.vertx.acme4j.tls.DynamicCertManager.CertCombo;
 import io.vertx.core.*;
 import io.vertx.core.buffer.Buffer;
 import org.apache.logging.log4j.LogManager;
@@ -41,10 +42,14 @@ import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.security.KeyPair;
 import java.security.PrivateKey;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateExpiredException;
+import java.security.cert.CertificateNotYetValidException;
 import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.Map.Entry;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -53,7 +58,9 @@ import java.util.stream.IntStream;
 
 import static io.vertx.core.Future.*;
 import static io.vertx.core.buffer.Buffer.buffer;
+import static java.lang.System.currentTimeMillis;
 import static java.util.Arrays.asList;
+import static java.util.concurrent.TimeUnit.DAYS;
 import static java.util.stream.Collectors.toList;
 
 public class AcmeManager {
@@ -319,24 +326,22 @@ public class AcmeManager {
     class CertificateManager {
         final Registration registration;
         final String accountDbId;
+        final int minimumValidityDays;
         final String certificateId;
         final AcmeConfig.Certificate oldC;
         final AcmeConfig.Certificate newC;
         final String privateKeyFile;
         final String certificateFile;
-        final Future<Boolean> certificateFileExists;
-        final Future<Boolean> privateKeyFileExists;
 
-        public CertificateManager(Registration registration, String accountDbId, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) {
+        public CertificateManager(Registration registration, String accountDbId, int minimumValidityDays, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) {
             this.registration = registration;
             this.accountDbId = accountDbId;
+            this.minimumValidityDays = minimumValidityDays;
             this.certificateId = certificateId;
             this.oldC = oldC;
             this.newC = newC;
             privateKeyFile = dbPath + accountDbId + "-" + certificateId + "-key.pem";
             certificateFile = dbPath + accountDbId + "-" + certificateId + "-certchain.pem";
-            certificateFileExists = ff((Future<Boolean> fut) -> vertx.fileSystem().exists(certificateFile, fut));
-            privateKeyFileExists = ff((Future<Boolean> fut) -> vertx.fileSystem().exists(privateKeyFile, fut));
         }
 
         public Future<Void> updateCached() {
@@ -344,27 +349,48 @@ public class AcmeManager {
                 // deregister certificate; certificate destruction should be handled in some other way
                 dynamicCertManager.remove(certificateId);
             }
-            return join(asList(certificateFileExists, privateKeyFileExists)).compose(x -> {
-                return succeededFuture(certificateFileExists.result() && privateKeyFileExists.result());
-                //return failedFuture("Either " + privateKeyFile + " or " + certificateFile + " is missing");
-            }).compose(filesExist -> {
+            if (dynamicCertManager.get(certificateId) != null) {
+                // already loaded
+                return succeededFuture();
+            }
+            final Future<Boolean> certificateFileExists = ff((Future<Boolean> fut) -> vertx.fileSystem().exists(certificateFile, fut));
+            final Future<Boolean> privateKeyFileExists = ff((Future<Boolean> fut) -> vertx.fileSystem().exists(privateKeyFile, fut));
+            return join(asList(certificateFileExists, privateKeyFileExists)).compose(x ->
+                    succeededFuture(certificateFileExists.result() && privateKeyFileExists.result())).compose(filesExist -> {
                 if (!filesExist) {
+                    // some files missing, can't use cached data
                     return succeededFuture();
                 }
                 Future<Buffer> certificateFut = ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(certificateFile, fut));
                 Future<Buffer> privateKeyFut = ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(privateKeyFile, fut));
-                return join(asList(certificateFileExists, privateKeyFileExists)).compose(x -> executeBlocking((Future<Void> fut) -> {
+                return executeBlocking((Future<Void> fut) -> {
                     X509Certificate[] certChain = PemLoader.loadCerts(certificateFut.result());
                     PrivateKey privateKey = PemLoader.loadPrivateKey(privateKeyFut.result());
+                    // TODO consider filtering subset of hostnames to be served
                     dynamicCertManager.put(certificateId, privateKey, certChain);
-                }));
+                });
             });
         }
 
         public Future<Void> updateOthers() {
+            // has the config changed
+            // is the certificate still valid
+            // are the authorizations still valid
+
             boolean gotCerts = certificateFileExists.result() && privateKeyFileExists.result();
-            if (gotCerts && oldC.equals(newC)) {
-                return succeededFuture();
+            boolean certificateValidEnough = false;
+            if (oldC.equals(newC)) {
+                // certificate is configuration-wise up-to-date
+                CertCombo certCombo = dynamicCertManager.get(certificateId);
+                if (certCombo != null) {
+                    X509Certificate cert = (X509Certificate) certCombo.certWithChain[0];
+                    try {
+                        cert.checkValidity(new Date(currentTimeMillis() + DAYS.toMillis(minimumValidityDays)));
+                        certificateValidEnough = true;
+                    } catch (CertificateException e) {
+                        // not valid
+                    }
+                }
             }
             logger.info("Domains to authorize: {}", newC.hostnames);
             for (String domainName : newC.hostnames) {
@@ -656,7 +682,7 @@ public class AcmeManager {
                 Thread.sleep(3000);
             } catch (AcmeRetryAfterException e) {
                 Date retryAfter = e.getRetryAfter();
-                long nextSleep = retryAfter.getTime() - System.currentTimeMillis();
+                long nextSleep = retryAfter.getTime() - currentTimeMillis();
                 logger.info("Waiting until {} for certificate e.g. {}ms", retryAfter, nextSleep);
                 Thread.sleep(nextSleep);
             }
