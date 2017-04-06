@@ -575,6 +575,9 @@ public class AcmeManager {
             if (ar.succeeded()) {
                 cur = conf;
             }
+            synchronized (AcmeManager.this) {
+                state = State.OK;
+            }
             startArh.handle(ar);
         });
     }
@@ -586,9 +589,15 @@ public class AcmeManager {
             }
             state = State.UPDATING;
         }
-        configManager.update(cur, conf, ar -> {
+        final AcmeConfig conf2 = conf.clone();
+        // TODO if something goes wrong on account level, continue with other accounts before failing
+        // TODO likewise for certificate level
+        configManager.update(cur, conf2, ar -> {
             if (ar.succeeded()) {
-                cur = conf.clone();
+                cur = conf2;
+            }
+            synchronized (AcmeManager.this) {
+                state = State.OK;
             }
             completionHandler.handle(ar);
         });
