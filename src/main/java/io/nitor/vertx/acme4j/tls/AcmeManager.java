@@ -207,17 +207,33 @@ public class AcmeManager {
             });
         }
 
-        private Authorization getAuthorization(String domain) {
-            if (authorizations == null) {
-                authorizations = new AbstractCollection<Authorization>registration.getAuthorizations();
-                St
-            }
-            Authorization authorization = authorizations.get(domain);
-            if (authorization == null) {
-                if (!authorizationsRetrieved) {
+        private Future<Authorization> getAuthorization(String domain) {
+            return (authorizations != null ? succeededFuture(authorizations) : executeBlocking((Future<Map<String, Authorization>> fut) -> {
+                fut.complete(authorizations = new AbstractCollection<Authorization>() {
+                    @Override
+                    public Iterator<Authorization> iterator() {
+                        try {
+                            return registration.getAuthorizations();
+                        } catch (AcmeException e) {
+                            throw new RuntimeException("Problem fetching existing authorizations", e);
+                        }
+                    }
 
-                }
-            }
+                    @Override
+                    public int size() {
+                        throw new UnsupportedOperationException();
+                    }
+                }.stream().collect(Collectors.toMap(Authorization::getDomain, t -> t)));
+            })).compose(fut -> {
+                Authorization authorization = authorizations.get(domain);
+                return authorization != null ? succeededFuture(authorization) : executeBlocking((Future<Authorization> fut2) -> {
+                    try {
+                        fut2.complete(registration.authorizeDomain(domain));
+                    } catch (AcmeException e) {
+                        fut2.fail(new RuntimeException("Problem creating new authorization", e));
+                    }
+                });
+            });
         }
 
         private String accountDbIdFor(String accountId, Account account) {
@@ -232,28 +248,6 @@ public class AcmeManager {
             String domainKeyPairFile = dbPath + accountDbId + '-' + DOMAIN_KEY_PAIR_FILE;
             return getOrCreateKeyPair(domainKeyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
             //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
-        }
-
-        private Future<KeyPair> getOrCreateKeyPair(final String keyPairFile, final Supplier<Future<KeyPair>> creator) {
-            return ff((Future<Boolean> fut) -> vertx.fileSystem().exists(keyPairFile, fut)).compose(keyFileExists -> {
-                if (keyFileExists) {
-                    // file exists
-                    return ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(keyPairFile, fut))
-                            .compose(existingKeyFile -> AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile))
-                            .map((KeyPair readKeyPair) -> {
-                                logger.info("Existing account keypair read from " + keyPairFile);
-                                return readKeyPair;
-                            });
-                } else {
-                    // file doesn't exist
-                    return creator.get().compose(createdKeyPair -> AsyncKeyPairUtils.writeKeyPair(vertx, createdKeyPair)
-                            .compose(keyPairSerialized -> ff((Future<Void> fut) -> vertx.fileSystem().writeFile(keyPairFile, keyPairSerialized, fut)))
-                            .map(v -> {
-                                logger.info("New account keypair written to " + keyPairFile);
-                                return createdKeyPair;
-                            }));
-                }
-            });
         }
 
         private Future<Registration> getOrCreateRegistration(String accountDbId, Account account, Session session) {
@@ -350,7 +344,7 @@ public class AcmeManager {
         final String privateKeyFile;
         final String certificateFile;
 
-        public CertificateManager(Registration registration, String accountDbId, int minimumValidityDays, Function<String, Authorization> getAuthorization, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) {
+        public CertificateManager(Registration registration, String accountDbId, int minimumValidityDays, Function<String, Future<Authorization>> getAuthorization, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) {
             this.registration = registration;
             this.accountDbId = accountDbId;
             this.minimumValidityDays = minimumValidityDays;
@@ -678,6 +672,27 @@ public class AcmeManager {
         }
     */
 
+    Future<KeyPair> getOrCreateKeyPair(final String keyPairFile, final Supplier<Future<KeyPair>> creator) {
+        return ff((Future<Boolean> fut) -> vertx.fileSystem().exists(keyPairFile, fut)).compose(keyFileExists -> {
+            if (keyFileExists) {
+                // file exists
+                return ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(keyPairFile, fut))
+                        .compose(existingKeyFile -> AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile))
+                        .map((KeyPair readKeyPair) -> {
+                            logger.info("Existing account keypair read from " + keyPairFile);
+                            return readKeyPair;
+                        });
+            } else {
+                // file doesn't exist
+                return creator.get().compose(createdKeyPair -> AsyncKeyPairUtils.writeKeyPair(vertx, createdKeyPair)
+                        .compose(keyPairSerialized -> ff((Future<Void> fut) -> vertx.fileSystem().writeFile(keyPairFile, keyPairSerialized, fut)))
+                        .map(v -> {
+                            logger.info("New account keypair written to " + keyPairFile);
+                            return createdKeyPair;
+                        }));
+            }
+        });
+    }
 
     public interface Write {
         void write(Writer w) throws IOException;
