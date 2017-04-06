@@ -31,31 +31,26 @@ import org.shredzone.acme4j.challenge.TlsSni02Challenge;
 import org.shredzone.acme4j.exception.AcmeConflictException;
 import org.shredzone.acme4j.exception.AcmeException;
 import org.shredzone.acme4j.exception.AcmeRetryAfterException;
-import org.shredzone.acme4j.exception.AcmeUnauthorizedException;
 import org.shredzone.acme4j.util.CSRBuilder;
 import org.shredzone.acme4j.util.CertificateUtils;
 import org.shredzone.acme4j.util.KeyPairUtils;
 
 import java.io.*;
-import java.net.Authenticator;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.security.KeyPair;
 import java.security.PrivateKey;
-import java.security.cert.CertificateException;
 import java.security.cert.CertificateExpiredException;
 import java.security.cert.CertificateNotYetValidException;
 import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.Map.Entry;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static io.vertx.core.Future.*;
 import static io.vertx.core.buffer.Buffer.buffer;
@@ -254,10 +249,10 @@ public class AcmeManager {
             // TODO update registration when agreement, contact or others change (save to file what were last used values)
             String domainAccountLocationFile = dbPath + accountDbId + '-' + DOMAIN_ACCOUNT_LOCATION_FILE;
             final List<String> contactURIs = account.contactURIs == null ? Collections.emptyList() : account.contactURIs;
-            return ff((Future<Boolean> fut) -> vertx.fileSystem().exists(domainAccountLocationFile, fut)).compose((Boolean keyFileExists) -> {
+            return future((Future<Boolean> fut) -> vertx.fileSystem().exists(domainAccountLocationFile, fut)).compose((Boolean keyFileExists) -> {
                 if (keyFileExists) {
                     logger.info("Domain account location file " + domainAccountLocationFile + " exists, using..");
-                    return ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(domainAccountLocationFile, fut)).compose(domainAccountLocation -> {
+                    return future((Future<Buffer> fut) -> vertx.fileSystem().readFile(domainAccountLocationFile, fut)).compose(domainAccountLocation -> {
                         String locationStr = domainAccountLocation.toString();
                         logger.info("Domain account location: " + locationStr);
                         URI location;
@@ -292,7 +287,7 @@ public class AcmeManager {
                             return;
                         }
                         createFut.complete(new SimpleEntry<>(registration, created));
-                    }).compose(creation -> ff((Future<Void> fut) ->
+                    }).compose(creation -> future((Future<Void> fut) ->
                             vertx.fileSystem().writeFile(domainAccountLocationFile, buffer(creation.getKey().getLocation().toASCIIString()), fut))
                             .map(v -> {
                                 logger.info("Domain account location file " + domainAccountLocationFile + " saved");
@@ -305,9 +300,9 @@ public class AcmeManager {
                 String acceptedTermsLocationFile = dbPath + accountDbId + '-' + ACCEPTED_TERMS_LOCATION_FILE;
                 boolean contactsChanged = !created && !registration.getContacts().equals(account.contactURIs.stream().map(URI::create).collect(Collectors.toList()));
                 return (contactsChanged || created ? succeededFuture(true) :
-                        ff((Future<Boolean> fut) -> vertx.fileSystem().exists(acceptedTermsLocationFile, fut)).compose(termsFileExists ->
+                        future((Future<Boolean> fut) -> vertx.fileSystem().exists(acceptedTermsLocationFile, fut)).compose(termsFileExists ->
                                 !termsFileExists ? succeededFuture(true) :
-                                        ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(acceptedTermsLocationFile, fut)).map(buf ->
+                                        future((Future<Buffer> fut) -> vertx.fileSystem().readFile(acceptedTermsLocationFile, fut)).map(buf ->
                                                 !buf.toString().equals(account.acceptedAgreementUrl)))
                 ).compose(registrationPropsChanged -> {
                     if (!registrationPropsChanged) {
@@ -365,16 +360,16 @@ public class AcmeManager {
                 // already loaded
                 return succeededFuture();
             }
-            final Future<Boolean> certificateFileExists = ff((Future<Boolean> fut) -> vertx.fileSystem().exists(certificateFile, fut));
-            final Future<Boolean> privateKeyFileExists = ff((Future<Boolean> fut) -> vertx.fileSystem().exists(privateKeyFile, fut));
+            final Future<Boolean> certificateFileExists = future((Future<Boolean> fut) -> vertx.fileSystem().exists(certificateFile, fut));
+            final Future<Boolean> privateKeyFileExists = future((Future<Boolean> fut) -> vertx.fileSystem().exists(privateKeyFile, fut));
             return join(asList(certificateFileExists, privateKeyFileExists)).compose(x ->
                     succeededFuture(certificateFileExists.result() && privateKeyFileExists.result())).compose(filesExist -> {
                 if (!filesExist) {
                     // some files missing, can't use cached data
                     return succeededFuture();
                 }
-                Future<Buffer> certificateFut = ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(certificateFile, fut));
-                Future<Buffer> privateKeyFut = ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(privateKeyFile, fut));
+                Future<Buffer> certificateFut = future((Future<Buffer> fut) -> vertx.fileSystem().readFile(certificateFile, fut));
+                Future<Buffer> privateKeyFut = future((Future<Buffer> fut) -> vertx.fileSystem().readFile(privateKeyFile, fut));
                 return executeBlocking((Future<Void> fut) -> {
                     X509Certificate[] certChain = PemLoader.loadCerts(certificateFut.result());
                     PrivateKey privateKey = PemLoader.loadPrivateKey(privateKeyFut.result());
@@ -673,10 +668,10 @@ public class AcmeManager {
     */
 
     Future<KeyPair> getOrCreateKeyPair(final String keyPairFile, final Supplier<Future<KeyPair>> creator) {
-        return ff((Future<Boolean> fut) -> vertx.fileSystem().exists(keyPairFile, fut)).compose(keyFileExists -> {
+        return future((Future<Boolean> fut) -> vertx.fileSystem().exists(keyPairFile, fut)).compose(keyFileExists -> {
             if (keyFileExists) {
                 // file exists
-                return ff((Future<Buffer> fut) -> vertx.fileSystem().readFile(keyPairFile, fut))
+                return future((Future<Buffer> fut) -> vertx.fileSystem().readFile(keyPairFile, fut))
                         .compose(existingKeyFile -> AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile))
                         .map((KeyPair readKeyPair) -> {
                             logger.info("Existing account keypair read from " + keyPairFile);
@@ -685,7 +680,7 @@ public class AcmeManager {
             } else {
                 // file doesn't exist
                 return creator.get().compose(createdKeyPair -> AsyncKeyPairUtils.writeKeyPair(vertx, createdKeyPair)
-                        .compose(keyPairSerialized -> ff((Future<Void> fut) -> vertx.fileSystem().writeFile(keyPairFile, keyPairSerialized, fut)))
+                        .compose(keyPairSerialized -> future((Future<Void> fut) -> vertx.fileSystem().writeFile(keyPairFile, keyPairSerialized, fut)))
                         .map(v -> {
                             logger.info("New account keypair written to " + keyPairFile);
                             return createdKeyPair;
@@ -761,13 +756,7 @@ public class AcmeManager {
                 });
     }
 
-    static <T> Future<T> ff(Consumer<Future<T>> consumer) {
-        Future<T> fut = future();
-        consumer.accept(fut);
-        return fut;
-    }
-
     <T> Future<T> executeBlocking(Handler<Future<T>> blockingHandler) {
-        return ff((Future<T> fut) -> vertx.executeBlocking(blockingHandler, fut));
+        return future((Future<T> fut) -> vertx.executeBlocking(blockingHandler, fut));
     }
 }
