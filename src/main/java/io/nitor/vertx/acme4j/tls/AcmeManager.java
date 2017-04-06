@@ -348,6 +348,7 @@ public class AcmeManager {
             if (newC == null) {
                 // deregister certificate; certificate destruction should be handled in some other way
                 dynamicCertManager.remove(certificateId);
+                return succeededFuture();
             }
             if (dynamicCertManager.get(certificateId) != null) {
                 // already loaded
@@ -368,6 +369,7 @@ public class AcmeManager {
                     PrivateKey privateKey = PemLoader.loadPrivateKey(privateKeyFut.result());
                     // TODO consider filtering subset of hostnames to be served
                     dynamicCertManager.put(certificateId, privateKey, certChain);
+                    fut.complete();
                 });
             });
         }
