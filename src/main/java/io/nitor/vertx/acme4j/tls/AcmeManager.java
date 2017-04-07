@@ -47,7 +47,6 @@ import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.Map.Entry;
-import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -61,7 +60,8 @@ import static java.util.stream.Collectors.toList;
 
 public class AcmeManager {
 
-    static final String DOMAIN_KEY_PAIR_FILE = "keypair.pem";
+    static final String ACCOUNT_KEY_PAIR_FILE = "account-keypair.pem";
+    static final String CERTIFICATE_KEY_PAIR_FILE = "certificate-keypair.pem"
     static final String DOMAIN_ACCOUNT_LOCATION_FILE = "accountLocation.txt";
     static final String ACCEPTED_TERMS_LOCATION_FILE = "acceptedTermsLocation.txt";
     static final String ACTIVE_CONF_PATH = "active.json";
@@ -240,7 +240,7 @@ public class AcmeManager {
         }
 
         private Future<KeyPair> getOrCreateAccountKeyPair(String accountDbId) {
-            String domainKeyPairFile = dbPath + accountDbId + '-' + DOMAIN_KEY_PAIR_FILE;
+            String domainKeyPairFile = dbPath + accountDbId + '-' + ACCOUNT_KEY_PAIR_FILE;
             return getOrCreateKeyPair(domainKeyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
             //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
         }
@@ -333,6 +333,7 @@ public class AcmeManager {
         final Registration registration;
         final String accountDbId;
         final int minimumValidityDays;
+        final Function<String, Future<Authorization>> getAuthorization;
         final String certificateId;
         final AcmeConfig.Certificate oldC;
         final AcmeConfig.Certificate newC;
@@ -343,6 +344,7 @@ public class AcmeManager {
             this.registration = registration;
             this.accountDbId = accountDbId;
             this.minimumValidityDays = minimumValidityDays;
+            this.getAuthorization = getAuthorization;
             this.certificateId = certificateId;
             this.oldC = oldC;
             this.newC = newC;
@@ -403,12 +405,10 @@ public class AcmeManager {
                 }
             }
             logger.info("Domains to authorize: {}", newC.hostnames);
-            for (String domainName : newC.hostnames) {
-                logger.info("Authorizing domain {}", domainName);
-                registration.getAuthorizations()
-                Authorization auth;
-                //try {
-                    auth = registration.authorizeDomain(domainName);
+            return newC.hostnames
+                    .stream()
+                    .map((domainName) -> (Supplier<Future<Void>>) () -> {
+                        logger.info("Authorizing domain {}", domainName);
                     /*
                 } catch (AcmeUnauthorizedException e) {
                     if (registration.getAgreement().equals(AGREEMENT_URI)) {
@@ -420,20 +420,29 @@ public class AcmeManager {
                     }
                 }
                 */
-                logger.info("Domain {} authorized, status {}", domainName, auth.getStatus());
-                if (auth.getStatus() == Status.VALID) continue; // TODO what statuses really?
-                if (true) continue;
-                logger.info("Challenge combinations supported: " + auth.getCombinations());
-                Collection<Challenge> combination = auth.findCombination(SUPPORTED_CHALLENGES);
-                logger.info("Challenges to complete: " + combination);
-                for (Challenge challenge : combination) {
-                    executeChallenge(domainName, challenge);
-                }
-                logger.info("Domain {} successfully associated with account", domainName);
-            }
-            logger.info("All domains successfully associated with account");
-            createCertificate(registration, accountDbId, certificateId, privateKeyFile, certificateFile, newC.hostnames, newC.organization);
-            logger.info("Certificate successfully activated. All done.");
+                        return getAuthorization.apply(domainName).compose(authorization -> {
+                            logger.info("Domain {} authorized, status {}", domainName, auth.getStatus());
+                            if (auth.getStatus() == Status.VALID) continue; // TODO what statuses really?
+                            if (true) continue;
+                            logger.info("Challenge combinations supported: " + auth.getCombinations());
+                            Collection<Challenge> combination = auth.findCombination(SUPPORTED_CHALLENGES);
+                            logger.info("Challenges to complete: " + combination);
+                            for (Challenge challenge : combination) {
+                                executeChallenge(domainName, challenge);
+                            }
+                            logger.info("Domain {} successfully associated with account", domainName);
+                        });
+                    })
+                    .reduce((Supplier<Future<Void>> a, Supplier<Future<Void>> b) -> () -> a.get().compose(v -> b.get()))
+                    .orElse(() -> succeededFuture())
+                    .get()
+                    .compose(v -> {
+                        logger.info("All domains successfully authorized by account");
+                        return createCertificate(registration, accountDbId, certificateId, privateKeyFile, certificateFile, newC.hostnames, newC.organization).map(w -> {
+                            logger.info("Certificate successfully activated. All done.");
+                            return w;
+                        });
+                    }));
         }
 
 
@@ -443,8 +452,17 @@ public class AcmeManager {
             }
         }
 
-        private void createCertificate(Registration registration, String accountDbId, String certificateId, String privateKeyFile, String certificateFile, List<String> domainNames, String organization) throws IOException, AcmeException, InterruptedException {
+        private Future<KeyPair> getOrCreateCertificateKeyPair() {
+            String domainKeyPairFile = dbPath + accountDbId + '-' + certificateId + "-" + CERTIFICATE_KEY_PAIR_FILE;
+            return getOrCreateKeyPair(domainKeyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
+            //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
+        }
+
+        private Future<Void> createCertificate(Registration registration, String accountDbId, String certificateId, String privateKeyFile, String certificateFile, List<String> domainNames, String organization) throws IOException, AcmeException, InterruptedException {
             logger.info("Creating private key");
+            getOrCreateCertificateKeyPair().compose(keyPair -> {
+                
+            });
             KeyPair domainKeyPair = KeyPairUtils.createKeyPair(4096);
             write(privateKeyFile, w -> writePrivateKey(domainKeyPair.getPrivate(), w));
 
