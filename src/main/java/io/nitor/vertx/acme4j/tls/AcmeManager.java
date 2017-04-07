@@ -154,12 +154,12 @@ public class AcmeManager {
         private Future<Void> updateCached2(String accountDbId, Account oldA, Account newA) {
             Map<String, AcmeConfig.Certificate> oldCs = oldA == null ? new HashMap<>() : oldA.certificates;
             Map<String, AcmeConfig.Certificate> newCs = newA == null ? new HashMap<>() : newA.certificates;
-            List<Future<?>> futures = mapDiff(oldCs, newCs)
+            Stream<Future<Void>> futures = mapDiff(oldCs, newCs)
                     .stream()
                     .map((certificate) -> {
                         final CertificateManager cm = new CertificateManager(null, accountDbId, newA.minimumValidityDays, null, certificate.key, certificate.oldValue, certificate.newValue);
                         return cm.updateCached().recover(t -> failedFuture(new RuntimeException("For certificate " + certificate.key, t)));
-                    }).collect(Collectors.toList());
+                    });
             return join(futures);
         }
 
@@ -192,12 +192,12 @@ public class AcmeManager {
                     this.registration = registration;
                     Map<String, AcmeConfig.Certificate> oldCs = oldA == null ? new HashMap<>() : oldA.certificates;
                     Map<String, AcmeConfig.Certificate> newCs = newAOrig == null ? new HashMap<>() : newAOrig.certificates;
-                    List<Future<?>> futures = mapDiff(oldCs, newCs)
+                    Stream<Future<Void>> futures = mapDiff(oldCs, newCs)
                             .stream()
                             .map((certificate) -> {
                                 final CertificateManager cm = new CertificateManager(registration, newAccountDbId, newAOrig.minimumValidityDays, this::getAuthorization, certificate.key, certificate.oldValue, certificate.newValue);
                                 return cm.updateOthers().recover(t -> failedFuture(new RuntimeException("For certificate " + certificate.key, t)));
-                            }).collect(Collectors.toList());
+                            });
                     return join(futures);
                 });
             });
@@ -365,7 +365,7 @@ public class AcmeManager {
             }
             final Future<Boolean> certificateFileExists = future((Future<Boolean> fut) -> vertx.fileSystem().exists(certificateFile, fut));
             final Future<Boolean> privateKeyFileExists = future((Future<Boolean> fut) -> vertx.fileSystem().exists(privateKeyFile, fut));
-            return join(asList(certificateFileExists, privateKeyFileExists)).compose(x ->
+            return join(asList(certificateFileExists, privateKeyFileExists).stream()).compose(x ->
                     succeededFuture(certificateFileExists.result() && privateKeyFileExists.result())).compose(filesExist -> {
                 if (!filesExist) {
                     // some files missing, can't use cached data
@@ -745,9 +745,8 @@ public class AcmeManager {
         }
     }
 
-    static Future<Void> join(List<Future<?>> futures) {
+    static <T> Future<Void> join(Stream<Future<T>> futures) {
         return futures
-                .stream()
                 .map((fut) -> (Function<Future<List<Throwable>>, Future<List<Throwable>>>) prev ->
                         prev.compose(throwables -> {
                             Future<List<Throwable>> res = future();
