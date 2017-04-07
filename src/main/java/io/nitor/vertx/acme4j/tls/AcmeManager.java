@@ -50,6 +50,7 @@ import java.util.Map.Entry;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static io.vertx.core.Future.*;
 import static io.vertx.core.buffer.Buffer.buffer;
@@ -405,7 +406,7 @@ public class AcmeManager {
                 }
             }
             logger.info("Domains to authorize: {}", newC.hostnames);
-            return newC.hostnames
+            return chain(newC.hostnames
                     .stream()
                     .map((domainName) -> (Supplier<Future<Void>>) () -> {
                         logger.info("Authorizing domain {}", domainName);
@@ -420,10 +421,9 @@ public class AcmeManager {
                     }
                 }
                 */
-                        return getAuthorization.apply(domainName).compose(authorization -> {
+                        return getAuthorization.apply(domainName).compose(auth -> {
                             logger.info("Domain {} authorized, status {}", domainName, auth.getStatus());
-                            if (auth.getStatus() == Status.VALID) continue; // TODO what statuses really?
-                            if (true) continue;
+                            if (auth.getStatus() == Status.VALID) return succeededFuture(); // TODO what statuses really?
                             logger.info("Challenge combinations supported: " + auth.getCombinations());
                             Collection<Challenge> combination = auth.findCombination(SUPPORTED_CHALLENGES);
                             logger.info("Challenges to complete: " + combination);
@@ -432,10 +432,7 @@ public class AcmeManager {
                             }
                             logger.info("Domain {} successfully associated with account", domainName);
                         });
-                    })
-                    .reduce((Supplier<Future<Void>> a, Supplier<Future<Void>> b) -> () -> a.get().compose(v -> b.get()))
-                    .orElse(() -> succeededFuture())
-                    .get()
+                    }))
                     .compose(v -> {
                         logger.info("All domains successfully authorized by account");
                         return createCertificate(registration, accountDbId, certificateId, privateKeyFile, certificateFile, newC.hostnames, newC.organization).map(w -> {
@@ -444,7 +441,6 @@ public class AcmeManager {
                         });
                     }));
         }
-
 
         public void writePrivateKey(PrivateKey key, Writer w) throws IOException {
             try (JcaPEMWriter jw = new JcaPEMWriter(w)) {
@@ -501,7 +497,7 @@ public class AcmeManager {
                 TlsSni02Challenge.TYPE
         };
 
-        private void executeChallenge(String domainName, Challenge challenge) throws IOException, AcmeException, InterruptedException {
+        private Future<Void> executeChallenge(String domainName, Challenge challenge) {
             KeyPair sniKeyPair = KeyPairUtils.createKeyPair(2048);
             X509Certificate cert;
             switch (challenge.getType()) {
@@ -772,6 +768,12 @@ public class AcmeManager {
                     }
                     return succeededFuture();
                 });
+    }
+
+    static Future<Void> chain(Stream<Supplier<Future<Void>>> stream) {
+        return stream.reduce((Supplier<Future<Void>> a, Supplier<Future<Void>> b) -> () -> a.get().compose(v -> b.get()))
+                .orElse(() -> succeededFuture())
+                .get();
     }
 
     <T> Future<T> executeBlocking(Handler<Future<T>> blockingHandler) {
