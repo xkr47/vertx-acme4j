@@ -67,12 +67,8 @@ public class AcmeManager {
     static final String DOMAIN_ACCOUNT_LOCATION_FILE = "accountLocation.txt";
     static final String ACCEPTED_TERMS_LOCATION_FILE = "acceptedTermsLocation.txt";
     static final String ACTIVE_CONF_PATH = "active.json";
-    //static final String CONTACT_EMAIL = null;
-    //static final String[] DOMAIN_NAMES = {"a139189489518.example.org"};
-    //static final String ORGANIZATION = "The Example Organization";
 
     //static final String ACME_SERVER_URI = "acme://letsencrypt.org/staging";
-
     // static final String AGREEMENT_URI = "https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf";
 
     private static Logger logger = LogManager.getLogger(AcmeManager.class);
@@ -385,9 +381,6 @@ public class AcmeManager {
         }
 
         public Future<Void> updateOthers() {
-            // has the config changed
-            // is the certificate still valid
-            // are the authorizations still valid
             if (newC == null) {
                 return succeededFuture();
             }
@@ -662,47 +655,6 @@ public class AcmeManager {
         return res;
     }
 
-    /*
-        private void reconfigureAccount(JsonObject account, boolean validate) {
-            String accountId = account.getString("id");
-            if (accountId == null) {
-                throw new IllegalArgumentException("Found account without id");
-            }
-            try {
-                String provider = account.getString("provider");
-                if (provider == null) {
-                    throw new IllegalArgumentException("Must specify provider url");
-                }
-                String acceptedAgreement = account.getString("acceptedAgreement");
-                account.getJsonArray("certificates").stream().map(JsonObject.class::cast)
-                        .forEach(certificate ->
-                                reconfigureCertificate(accountId, certificate, validate)
-                        );
-            } catch (Exception e) {
-                throw new RuntimeException("For account " + accountId);
-            }
-        }
-
-        private boolean reconfigureCertificate(String accountId, JsonObject certificate, boolean validate) {
-            String certificateId = certificate.getString("id");
-            if (certificateId == null) {
-                throw new IllegalArgumentException("Found certificate without id");
-            }
-            try {
-                String organization = certificate.getString("organization");
-                List<String> hostnames = certificate.getJsonArray("hostnames").stream().map(String.class::cast)
-                        .distinct()
-                        .collect(Collectors.toList());
-                if (hostnames.isEmpty()) {
-                    throw new IllegalArgumentException("Must specify at least one hostname");
-                }
-
-            } catch (Exception e) {
-                throw new RuntimeException("For certificate " +  certificateId);
-            }
-        }
-    */
-
     Future<KeyPair> getOrCreateKeyPair(String type, final String keyPairFile, final Supplier<Future<KeyPair>> creator) {
         return future((Future<Boolean> fut) -> vertx.fileSystem().exists(keyPairFile, fut)).compose(keyFileExists -> {
             if (keyFileExists) {
@@ -723,16 +675,6 @@ public class AcmeManager {
                         }));
             }
         });
-    }
-
-    public interface Write {
-        void write(Writer w) throws IOException;
-    }
-
-    private static void write(String file, Write write) throws IOException {
-        try (Writer w = new OutputStreamWriter(new FileOutputStream(file), "UTF-8")) {
-            write.write(w);
-        }
     }
 
     <T> Future<T> fetchWithRetry(Callable<T> blockingHandler) {
