@@ -339,6 +339,7 @@ public class AcmeManager {
         final int minimumValidityDays;
         final Function<String, Future<Authorization>> getAuthorization;
         final String certificateId;
+        final String fullCertificateId;
         final AcmeConfig.Certificate oldC;
         final AcmeConfig.Certificate newC;
         final String privateKeyFile;
@@ -350,6 +351,7 @@ public class AcmeManager {
             this.minimumValidityDays = minimumValidityDays;
             this.getAuthorization = getAuthorization;
             this.certificateId = certificateId;
+            this.fullCertificateId = accountDbId + "-" + certificateId;
             this.oldC = oldC;
             this.newC = newC;
             privateKeyFile = dbPath + accountDbId + "-" + certificateId + "-key.pem";
@@ -359,10 +361,10 @@ public class AcmeManager {
         public Future<Void> updateCached() {
             if (newC == null) {
                 // deregister certificate; certificate destruction should be handled in some other way
-                dynamicCertManager.remove(certificateId);
+                dynamicCertManager.remove(fullCertificateId);
                 return succeededFuture();
             }
-            if (dynamicCertManager.get(certificateId) != null) {
+            if (dynamicCertManager.get(fullCertificateId) != null) {
                 // already loaded
                 return succeededFuture();
             }
@@ -380,7 +382,7 @@ public class AcmeManager {
                     X509Certificate[] certChain = PemLoader.loadCerts(certificateFut.result());
                     PrivateKey privateKey = PemLoader.loadPrivateKey(privateKeyFut.result());
                     // TODO consider filtering subset of hostnames to be served
-                    dynamicCertManager.put(certificateId, privateKey, certChain);
+                    dynamicCertManager.put(fullCertificateId, privateKey, certChain);
                     fut.complete();
                 });
             });
@@ -392,7 +394,7 @@ public class AcmeManager {
             }
             if (oldC.equals(newC)) {
                 // certificate is configuration-wise up-to-date
-                CertCombo certCombo = dynamicCertManager.get(certificateId);
+                CertCombo certCombo = dynamicCertManager.get(fullCertificateId);
                 if (certCombo != null) {
                     X509Certificate cert = (X509Certificate) certCombo.certWithChain[0];
                     try {
