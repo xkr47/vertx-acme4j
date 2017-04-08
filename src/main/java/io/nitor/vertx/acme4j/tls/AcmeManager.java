@@ -62,7 +62,7 @@ import static java.util.stream.Collectors.toList;
 public class AcmeManager {
 
     static final String ACCOUNT_KEY_PAIR_FILE = "account-keypair.pem";
-    static final String CERTIFICATE_KEY_PAIR_FILE = "certificate-keypair.pem"
+    static final String CERTIFICATE_KEY_PAIR_FILE = "certificate-keypair.pem";
     static final String DOMAIN_ACCOUNT_LOCATION_FILE = "accountLocation.txt";
     static final String ACCEPTED_TERMS_LOCATION_FILE = "acceptedTermsLocation.txt";
     static final String ACTIVE_CONF_PATH = "active.json";
@@ -241,8 +241,8 @@ public class AcmeManager {
         }
 
         private Future<KeyPair> getOrCreateAccountKeyPair(String accountDbId) {
-            String domainKeyPairFile = dbPath + accountDbId + '-' + ACCOUNT_KEY_PAIR_FILE;
-            return getOrCreateKeyPair(domainKeyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
+            String accountKeyPairFile = dbPath + accountDbId + '-' + ACCOUNT_KEY_PAIR_FILE;
+            return getOrCreateKeyPair("account", accountKeyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
             //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
         }
 
@@ -452,47 +452,60 @@ public class AcmeManager {
         }
 
         private Future<KeyPair> getOrCreateCertificateKeyPair() {
-            String domainKeyPairFile = dbPath + accountDbId + '-' + certificateId + "-" + CERTIFICATE_KEY_PAIR_FILE;
-            return getOrCreateKeyPair(domainKeyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
+            String certificateKeyPairFile = dbPath + accountDbId + '-' + certificateId + "-" + CERTIFICATE_KEY_PAIR_FILE;
             //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
+            return getOrCreateKeyPair("certificate", certificateKeyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
         }
 
         private Future<Void> createCertificate(Registration registration, String accountDbId, String certificateId, String privateKeyFile, String certificateFile, List<String> domainNames, String organization) {
             logger.info("Creating private key");
-            getOrCreateCertificateKeyPair().compose(keyPair -> {
-                
-            });
-            KeyPair domainKeyPair = KeyPairUtils.createKeyPair(4096);
-            write(privateKeyFile, w -> writePrivateKey(domainKeyPair.getPrivate(), w));
+            return getOrCreateCertificateKeyPair().compose(domainKeyPair -> executeBlocking((Future<Void> fut) -> {
+                // write(privateKeyFile, w -> writePrivateKey(domainKeyPair.getPrivate(), w));
 
-            logger.info("Creating certificate request (CSR)");
-            CSRBuilder csrb = new CSRBuilder();
-            for (String domainName : domainNames) {
-                csrb.addDomain(domainName);
-            }
-            csrb.setOrganization(organization);
-            csrb.sign(domainKeyPair);
-            byte[] csr = csrb.getEncoded();
+                final CSRBuilder csrb;
+                try {
+                    logger.info("Creating certificate request (CSR)");
+                    csrb = new CSRBuilder();
+                    for (String domainName : domainNames) {
+                        csrb.addDomain(domainName);
+                    }
+                    csrb.setOrganization(organization);
+                    csrb.sign(domainKeyPair);
 
-            logger.info("Saving certificate request for renewal purposes");
-            try (FileWriter fw = new FileWriter(dbPath + accountDbId + "-" + certificateId + "-cert-request.csr")) {
-                csrb.write(fw);
-            }
+                    logger.info("Saving certificate request for renewal purposes");
+                    StringWriter sw = new StringWriter();
+                    csrb.write(sw);
+                    final Buffer buffer = buffer(sw.toString());
 
-            logger.info("Requesting certificate meta..");
-            final Certificate certificate = fetchWithRetry(() -> registration.requestCertificate(csr));
-            logger.info("Requesting certificate..");
-            X509Certificate cert = fetchWithRetry(() -> certificate.download());
-            logger.info("Requesting certificate chain..");
-            X509Certificate[] chain = fetchWithRetry(() -> certificate.downloadChain());
+                    future((Future<Void> fut2) -> {
+                        String csrFile = dbPath + accountDbId + "-" + certificateId + "-cert-request.csr";
+                        vertx.fileSystem().writeFile(csrFile, buffer, fut2);
+                    }).compose(v -> executeBlocking((Future<Void> fut3) -> {
+                        try {
+                            byte[] csr = csrb.getEncoded();
+                            logger.info("Requesting certificate meta..");
+                            final Certificate certificate = fetchWithRetry(() -> registration.requestCertificate(csr));
+                            logger.info("Requesting certificate..");
+                            X509Certificate cert = fetchWithRetry(() -> certificate.download());
+                            logger.info("Requesting certificate chain..");
+                            X509Certificate[] chain = fetchWithRetry(() -> certificate.downloadChain());
 
-            logger.info("Saving certificate chain");
-            try (FileWriter fw = new FileWriter(certificateFile)) {
-                CertificateUtils.writeX509CertificateChain(fw, cert, chain);
-            }
+                            logger.info("Saving certificate chain");
+                            try (FileWriter fw = new FileWriter(certificateFile)) {
+                                CertificateUtils.writeX509CertificateChain(fw, cert, chain);
+                            }
 
-            logger.info("Installing certificate");
-            dynamicCertManager.put("letsencrypt-cert-" + certificateId, domainKeyPair.getPrivate(), cert, chain);
+                            logger.info("Installing certificate");
+                            dynamicCertManager.put("letsencrypt-cert-" + certificateId, domainKeyPair.getPrivate(), cert, chain);
+                        } catch (Exception e) {
+                            fut3.fail(e);
+                        }
+                    })).handle(fut);
+                } catch (IOException e) {
+                    fut.fail(e);
+                    return;
+                }
+            }));
         }
 
         private final String[] SUPPORTED_CHALLENGES = {
@@ -684,14 +697,14 @@ public class AcmeManager {
         }
     */
 
-    Future<KeyPair> getOrCreateKeyPair(final String keyPairFile, final Supplier<Future<KeyPair>> creator) {
+    Future<KeyPair> getOrCreateKeyPair(String type, final String keyPairFile, final Supplier<Future<KeyPair>> creator) {
         return future((Future<Boolean> fut) -> vertx.fileSystem().exists(keyPairFile, fut)).compose(keyFileExists -> {
             if (keyFileExists) {
                 // file exists
                 return future((Future<Buffer> fut) -> vertx.fileSystem().readFile(keyPairFile, fut))
                         .compose(existingKeyFile -> AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile))
                         .map((KeyPair readKeyPair) -> {
-                            logger.info("Existing account keypair read from " + keyPairFile);
+                            logger.info("Existing " + type + " keypair read from " + keyPairFile);
                             return readKeyPair;
                         });
             } else {
@@ -699,7 +712,7 @@ public class AcmeManager {
                 return creator.get().compose(createdKeyPair -> AsyncKeyPairUtils.writeKeyPair(vertx, createdKeyPair)
                         .compose(keyPairSerialized -> future((Future<Void> fut) -> vertx.fileSystem().writeFile(keyPairFile, keyPairSerialized, fut)))
                         .map(v -> {
-                            logger.info("New account keypair written to " + keyPairFile);
+                            logger.info("New " + type + " keypair written to " + keyPairFile);
                             return createdKeyPair;
                         }));
             }
