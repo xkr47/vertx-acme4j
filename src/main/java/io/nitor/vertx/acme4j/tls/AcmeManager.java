@@ -714,6 +714,7 @@ public class AcmeManager {
         }
     }
 
+    // wait for all futures to finish, discard success values, collect & wrap all exceptions thrown, returned as failed future
     static <T> Future<Void> join(Stream<Future<T>> futures) {
         return futures
                 .map((fut) -> (Function<Future<List<Throwable>>, Future<List<Throwable>>>) prev ->
@@ -738,6 +739,7 @@ public class AcmeManager {
                 });
     }
 
+    // for a stream of callable functions returning futures, execute each in order, waiting for the previous' Future to complete, and returning a future completing when all completes. Aborts on failure, returning failure without executing rest of futures
     static Future<Void> chain(Stream<Supplier<Future<Void>>> stream) {
         return stream.reduce((Supplier<Future<Void>> a, Supplier<Future<Void>> b) -> () -> a.get().compose(v -> b.get()))
                 .orElse(() -> succeededFuture())
