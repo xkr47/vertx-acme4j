@@ -19,7 +19,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
 import io.nitor.vertx.acme4j.tls.AcmeConfig.Account;
 import io.nitor.vertx.acme4j.tls.DynamicCertManager.CertCombo;
-import io.vertx.core.*;
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Future;
+import io.vertx.core.Handler;
+import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -35,7 +38,10 @@ import org.shredzone.acme4j.util.CSRBuilder;
 import org.shredzone.acme4j.util.CertificateUtils;
 import org.shredzone.acme4j.util.KeyPairUtils;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.StringWriter;
+import java.io.UnsupportedEncodingException;
+import java.io.Writer;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
@@ -513,29 +519,34 @@ public class AcmeManager {
         };
 
         private Future<Void> executeChallenge(String domainName, Challenge challenge) {
-            KeyPair sniKeyPair = KeyPairUtils.createKeyPair(2048);
-            X509Certificate cert;
-            switch (challenge.getType()) {
-                case TlsSni01Challenge.TYPE: {
-                    TlsSni01Challenge c = (TlsSni01Challenge) challenge;
-                    cert = CertificateUtils.createTlsSniCertificate(sniKeyPair, c.getSubject());
-                    break;
+            return executeBlocking((Future<String> fut) -> {
+                try {
+                    KeyPair sniKeyPair = KeyPairUtils.createKeyPair(4096);
+                    X509Certificate cert;
+                    switch (challenge.getType()) {
+                        case TlsSni01Challenge.TYPE: {
+                            TlsSni01Challenge c = (TlsSni01Challenge) challenge;
+                            cert = CertificateUtils.createTlsSniCertificate(sniKeyPair, c.getSubject());
+                            break;
+                        }
+                        case TlsSni02Challenge.TYPE: {
+                            TlsSni02Challenge c = (TlsSni02Challenge) challenge;
+                            cert = CertificateUtils.createTlsSni02Certificate(sniKeyPair, c.getSubject(), c.getSanB());
+                            break;
+                        }
+                        default:
+                            throw new UnsupportedOperationException("Internal error, unsupported challenge type " + challenge.getType());
+                    }
+                    final String id = "letsencrypt-challenge-" + domainName;
+                    dynamicCertManager.put(id, sniKeyPair.getPrivate(), cert);
+                    logger.info("Challenge {} prepared, executing..", challenge.getType());
+                    challenge.trigger();
+                    fut.complete(id);
+                } catch (Exception e) {
+                    fut.fail(e);
                 }
-                case TlsSni02Challenge.TYPE: {
-                    TlsSni02Challenge c = (TlsSni02Challenge) challenge;
-                    cert = CertificateUtils.createTlsSni02Certificate(sniKeyPair, c.getSubject(), c.getSanB());
-                    break;
-                }
-                default:
-                    throw new UnsupportedOperationException("Internal error, unsupported challenge type " + challenge.getType());
-            }
-            final String id = "letsencrypt-challenge-" + domainName;
-            try {
-                dynamicCertManager.put(id, sniKeyPair.getPrivate(), cert);
-                logger.info("Challenge {} prepared, executing..", challenge.getType());
-                challenge.trigger();
-
-                fetchWithRetry(new Callable<Boolean>() {
+            }).compose(id -> {
+                return fetchWithRetry(new Callable<Boolean>() {
                     Status reportedStatus = null;
 
                     @Override
@@ -545,20 +556,26 @@ public class AcmeManager {
                             reportedStatus = challenge.getStatus();
                         }
                         if (challenge.getStatus() == Status.VALID || challenge.getStatus() == Status.INVALID) {
+                            // final state
                             return true;
                         }
                         challenge.update();
                         return null;
                     }
+                }).recover(t -> {
+                    dynamicCertManager.remove(id);
+                    logger.info("Challenge {} cleaned up", challenge.getType());
+                    return failedFuture(t);
+                }).compose(s -> {
+                    logger.info("Challenge execution completed with status " + challenge.getStatus());
+                    dynamicCertManager.remove(id);
+                    logger.info("Challenge {} cleaned up", challenge.getType());
+                    if (challenge.getStatus() == Status.VALID) {
+                        return succeededFuture();
+                    }
+                    return failedFuture(new RuntimeException("Challenge " + challenge.getType() + " for " + domainName + " failed with status " + challenge.getStatus()));
                 });
-                logger.info("Challenge execution completed with status " + challenge.getStatus());
-                if (challenge.getStatus() != Status.VALID) {
-                    throw new RuntimeException("Challenge " + challenge.getType() + " for " + domainName + " failed with status " + challenge.getStatus());
-                }
-            } finally {
-                dynamicCertManager.remove(id);
-                logger.info("Challenge {} cleaned up", challenge.getType());
-            }
+            });
         }
     }
 
