@@ -47,6 +47,7 @@ import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.Map.Entry;
+import java.util.concurrent.Callable;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -480,27 +481,32 @@ public class AcmeManager {
                     future((Future<Void> fut2) -> {
                         String csrFile = dbPath + accountDbId + "-" + certificateId + "-cert-request.csr";
                         vertx.fileSystem().writeFile(csrFile, buffer, fut2);
-                    }).compose(v -> executeBlocking((Future<Void> fut3) -> {
-                        try {
-                            byte[] csr = csrb.getEncoded();
-                            logger.info("Requesting certificate meta..");
-                            final Certificate certificate = fetchWithRetry(() -> registration.requestCertificate(csr));
+                    }).compose(v -> {
+                        logger.info("Requesting certificate meta..");
+                        return fetchWithRetry(() -> registration.requestCertificate(csrb.getEncoded())).compose(certificate -> {
                             logger.info("Requesting certificate..");
-                            X509Certificate cert = fetchWithRetry(() -> certificate.download());
-                            logger.info("Requesting certificate chain..");
-                            X509Certificate[] chain = fetchWithRetry(() -> certificate.downloadChain());
-
-                            logger.info("Saving certificate chain");
-                            try (FileWriter fw = new FileWriter(certificateFile)) {
-                                CertificateUtils.writeX509CertificateChain(fw, cert, chain);
-                            }
-
-                            logger.info("Installing certificate");
-                            dynamicCertManager.put("letsencrypt-cert-" + certificateId, domainKeyPair.getPrivate(), cert, chain);
-                        } catch (Exception e) {
-                            fut3.fail(e);
-                        }
-                    })).handle(fut);
+                            return fetchWithRetry(() -> certificate.download()).compose(cert -> {
+                                logger.info("Requesting certificate chain..");
+                                return fetchWithRetry(() -> certificate.downloadChain()).compose(chain -> {
+                                    logger.info("Saving certificate chain");
+                                    return executeBlocking((Future<Buffer> writeCert) -> {
+                                        try {
+                                            StringWriter certSw = new StringWriter();
+                                            CertificateUtils.writeX509CertificateChain(certSw, cert, chain);
+                                            writeCert.complete(buffer(certSw.toString()));
+                                        } catch (IOException e) {
+                                            writeCert.fail(e);
+                                        }
+                                    }).compose(certBuffer ->
+                                            future((Future<Void> fut4) -> vertx.fileSystem().writeFile(certificateFile, certBuffer, fut4)).compose(vv -> {
+                                                logger.info("Installing certificate");
+                                                dynamicCertManager.put("letsencrypt-cert-" + certificateId, domainKeyPair.getPrivate(), cert, chain);
+                                                return Future.<Void>succeededFuture();
+                                            }));
+                                });
+                            });
+                        });
+                    }).setHandler(fut);
                 } catch (IOException e) {
                     fut.fail(e);
                     return;
@@ -536,11 +542,11 @@ public class AcmeManager {
                 logger.info("Challenge {} prepared, executing..", challenge.getType());
                 challenge.trigger();
 
-                fetchWithRetry(new AcmeSupplier<Boolean>() {
+                fetchWithRetry(new Callable<Boolean>() {
                     Status reportedStatus = null;
 
                     @Override
-                    public Boolean get() throws AcmeException {
+                    public Boolean call() throws Exception {
                         if (challenge.getStatus() != reportedStatus) {
                             logger.info("Challenge status: " + challenge.getStatus());
                             reportedStatus = challenge.getStatus();
@@ -729,25 +735,30 @@ public class AcmeManager {
         }
     }
 
-    public interface AcmeSupplier<T> {
-        T get() throws AcmeException;
+    <T> Future<T> fetchWithRetry(Callable<T> blockingHandler) {
+        return future((Future<T> fut) -> fetchWithRetry(blockingHandler, fut));
     }
 
-    <T> T fetchWithRetry(AcmeSupplier<T> supplier) throws InterruptedException, AcmeException {
-        while (true) {
+    <T> void fetchWithRetry(Callable<T> blockingHandler, Future<T> done) {
+        vertx.executeBlocking((Future<T> fut) -> {
             try {
-                T t = supplier.get();
-                if (t != null) {
-                    return t;
-                }
-                Thread.sleep(3000);
-            } catch (AcmeRetryAfterException e) {
-                Date retryAfter = e.getRetryAfter();
-                long nextSleep = retryAfter.getTime() - currentTimeMillis();
-                logger.info("Waiting until {} for certificate e.g. {}ms", retryAfter, nextSleep);
-                Thread.sleep(nextSleep);
+                fut.complete(blockingHandler.call());
+            } catch (Exception e) {
+                fut.fail(e);
             }
-        }
+        }, ar -> {
+            if (ar.failed() && !(ar.cause() instanceof AcmeRetryAfterException)) {
+                done.fail(ar.cause());
+                return;
+            }
+            if (ar.succeeded() && ar.result() != null) {
+                done.complete(ar.result());
+                return;
+            }
+            long nextSleep = ar.succeeded() ? 3000 : ((AcmeRetryAfterException) ar.cause()).getRetryAfter().getTime() - currentTimeMillis();
+            logger.info("Recheck in {}ms", nextSleep);
+            vertx.setTimer(nextSleep, timerId -> fetchWithRetry(blockingHandler, done));
+        });
     }
 
     public static class MapDiff<K, V> {
