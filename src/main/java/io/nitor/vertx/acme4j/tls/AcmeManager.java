@@ -421,17 +421,20 @@ public class AcmeManager {
                     }
                 }
                 */
-                        return getAuthorization.apply(domainName).compose(auth -> {
-                            logger.info("Domain {} authorized, status {}", domainName, auth.getStatus());
-                            if (auth.getStatus() == Status.VALID) return succeededFuture(); // TODO what statuses really?
-                            logger.info("Challenge combinations supported: " + auth.getCombinations());
-                            Collection<Challenge> combination = auth.findCombination(SUPPORTED_CHALLENGES);
-                            logger.info("Challenges to complete: " + combination);
-                            for (Challenge challenge : combination) {
-                                executeChallenge(domainName, challenge);
-                            }
-                            logger.info("Domain {} successfully associated with account", domainName);
-                        });
+                        return getAuthorization.apply(domainName).compose(auth ->
+                                executeBlocking((Future<Status> fut) -> fut.complete(auth.getStatus())).compose(status -> {
+                                    logger.info("Domain {} authorization status: {}", domainName, status);
+                                    if (status == Status.VALID)
+                                        return succeededFuture(); // TODO what statuses really?
+                                    logger.info("Challenge combinations supported: " + auth.getCombinations());
+                                    Collection<Challenge> combination = auth.findCombination(SUPPORTED_CHALLENGES);
+                                    logger.info("Challenges to complete: " + combination);
+                                    return chain(combination.stream().map(challenge -> (Supplier<Future<Void>>) () ->
+                                            executeChallenge(domainName, challenge))).map(v -> {
+                                        logger.info("Domain {} successfully associated with account", domainName);
+                                        return null;
+                                    });
+                                })).<Void>mapEmpty();
                     }))
                     .compose(v -> {
                         logger.info("All domains successfully authorized by account");
@@ -439,7 +442,7 @@ public class AcmeManager {
                             logger.info("Certificate successfully activated. All done.");
                             return w;
                         });
-                    }));
+                    });
         }
 
         public void writePrivateKey(PrivateKey key, Writer w) throws IOException {
@@ -454,7 +457,7 @@ public class AcmeManager {
             //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
         }
 
-        private Future<Void> createCertificate(Registration registration, String accountDbId, String certificateId, String privateKeyFile, String certificateFile, List<String> domainNames, String organization) throws IOException, AcmeException, InterruptedException {
+        private Future<Void> createCertificate(Registration registration, String accountDbId, String certificateId, String privateKeyFile, String certificateFile, List<String> domainNames, String organization) {
             logger.info("Creating private key");
             getOrCreateCertificateKeyPair().compose(keyPair -> {
                 
