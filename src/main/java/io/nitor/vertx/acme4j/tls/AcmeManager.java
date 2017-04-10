@@ -670,7 +670,7 @@ public class AcmeManager {
                 .filter(e -> !old.containsKey(e.getKey()))
                 .map(e -> new MapDiff<>(e.getKey(), null, e.getValue()))
                 .collect(toList());
-        res.addAll(res);
+        res.addAll(res2);
         return res;
     }
 
