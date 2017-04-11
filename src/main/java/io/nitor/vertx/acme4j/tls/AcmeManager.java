@@ -63,6 +63,7 @@ import static io.vertx.core.Future.*;
 import static io.vertx.core.buffer.Buffer.buffer;
 import static java.lang.System.currentTimeMillis;
 import static java.util.Arrays.asList;
+import static java.util.Collections.emptyMap;
 import static java.util.concurrent.TimeUnit.DAYS;
 import static java.util.stream.Collectors.toList;
 
@@ -121,6 +122,10 @@ public class AcmeManager {
                     .reduce(Function::andThen)
                     .orElse(f -> f)
                     .apply(succeededFuture())
+                    .map(v -> {
+                        logger.info("Done updating " + newC.accounts.size() + " accounts");
+                        return v;
+                    })
                     .setHandler(doneHandler);
         }
     }
@@ -592,34 +597,45 @@ public class AcmeManager {
         synchronized (AcmeManager.this) {
             state = State.UPDATING;
         }
-        vertx.fileSystem().readFile(activeConfigPath(), fileAr -> {
-            if (fileAr.failed()) {
-                synchronized (AcmeManager.this) {
-                    state = State.FAILED;
-                }
-                startArh.handle(fileAr.mapEmpty());
+        vertx.fileSystem().exists(activeConfigPath(), exists -> {
+            if (exists.failed()) {
+                startArh.handle(failedFuture(new RuntimeException("Error checking previous config", exists.cause())));
                 return;
             }
-            vertx.<AcmeConfig>executeBlocking(fut -> {
-                try {
-                    ObjectMapper objectMapper = new ObjectMapper();
-                    fut.complete(objectMapper.readValue(fileAr.result().getBytes(), AcmeConfig.class));
-                } catch (IOException e) {
-                    fut.fail(e);
-                }
-            }, readConf -> {
-                if (readConf.failed()) {
+            if (!exists.result()) {
+                AcmeConfig emptyConf = new AcmeConfig();
+                emptyConf.accounts = emptyMap();
+                startWithConfig(emptyConf, ar -> {
+                    startArh.handle(ar);
+                });
+                return;
+            }
+            vertx.fileSystem().readFile(activeConfigPath(), fileAr -> {
+                if (fileAr.failed()) {
                     synchronized (AcmeManager.this) {
                         state = State.FAILED;
                     }
-                    startArh.handle(readConf.mapEmpty());
+                    startArh.handle(failedFuture(new RuntimeException("Error loading previous config", fileAr.cause())));
                     return;
                 }
-                startWithConfig(readConf.result(), ar -> {
-                    synchronized (AcmeManager.this) {
-                        state = ar.failed() ? State.FAILED : State.OK;
+                vertx.<AcmeConfig>executeBlocking(fut -> {
+                    try {
+                        ObjectMapper objectMapper = new ObjectMapper();
+                        fut.complete(objectMapper.readValue(fileAr.result().getBytes(), AcmeConfig.class));
+                    } catch (IOException e) {
+                        fut.fail(e);
                     }
-                    startArh.handle(ar);
+                }, readConf -> {
+                    if (readConf.failed()) {
+                        synchronized (AcmeManager.this) {
+                            state = State.FAILED;
+                        }
+                        startArh.handle(readConf.mapEmpty());
+                        return;
+                    }
+                    startWithConfig(readConf.result(), ar -> {
+                        startArh.handle(ar);
+                    });
                 });
             });
         });
@@ -628,18 +644,6 @@ public class AcmeManager {
     enum State { NOT_STARTED, UPDATING, OK, FAILED }
 
     private State state = State.NOT_STARTED;
-
-    private void startWithConfig(AcmeConfig conf, Handler<AsyncResult<Void>> startArh) {
-        configManager.update(null, conf, ar -> {
-            if (ar.succeeded()) {
-                cur = conf;
-            }
-            synchronized (AcmeManager.this) {
-                state = State.OK;
-            }
-            startArh.handle(ar);
-        });
-    }
 
     public void reconfigure(AcmeConfig conf, Handler<AsyncResult<Void>> completionHandler) {
         synchronized (AcmeManager.this) {
@@ -654,11 +658,25 @@ public class AcmeManager {
         configManager.update(cur, conf2, ar -> {
             if (ar.succeeded()) {
                 cur = conf2;
+                writeConf();
             }
             synchronized (AcmeManager.this) {
                 state = State.OK;
             }
             completionHandler.handle(ar);
+        });
+    }
+
+    private void startWithConfig(AcmeConfig conf, Handler<AsyncResult<Void>> startArh) {
+        configManager.update(null, conf, ar -> {
+            if (ar.succeeded()) {
+                cur = conf;
+                writeConf();
+            }
+            synchronized (AcmeManager.this) {
+                state = ar.failed() ? State.FAILED : State.OK;
+            }
+            startArh.handle(ar);
         });
     }
 
