@@ -93,9 +93,9 @@ public class AcmeManager {
     }
 
     class AcmeConfigManager {
-        public void update(final AcmeConfig oldC, final AcmeConfig newC, final Handler<AsyncResult<Void>> doneHandler) {
+        public Future<Void> update(final AcmeConfig oldC, final AcmeConfig newC) {
             newC.validate();
-            mapDiff(oldC == null ? new HashMap<>() : oldC.accounts, newC.accounts)
+            return mapDiff(oldC == null ? new HashMap<>() : oldC.accounts, newC.accounts)
                     .stream()
                     .map((account) -> (Function<Future<Void>, Future<Void>>) prev -> {
                         final AccountManager am = new AccountManager(account.key, account.oldValue, account.newValue);
@@ -125,8 +125,7 @@ public class AcmeManager {
                     .map(v -> {
                         logger.info("Done updating " + newC.accounts.size() + " accounts");
                         return v;
-                    })
-                    .setHandler(doneHandler);
+                    });
         }
     }
 
@@ -590,62 +589,59 @@ public class AcmeManager {
         return dbPath + ACTIVE_CONF_PATH;
     }
 
-    public void start(Handler<AsyncResult<Void>> startArh) {
+    public Future<Void> start() {
         if (state != State.NOT_STARTED) {
             throw new IllegalStateException("Already started");
         }
         synchronized (AcmeManager.this) {
             state = State.UPDATING;
         }
-        vertx.fileSystem().exists(activeConfigPath(), exists -> {
-            if (exists.failed()) {
-                startArh.handle(failedFuture(new RuntimeException("Error checking previous config", exists.cause())));
-                return;
-            }
-            if (!exists.result()) {
-                AcmeConfig emptyConf = new AcmeConfig();
-                emptyConf.accounts = emptyMap();
-                startWithConfig(emptyConf, ar -> {
-                    startArh.handle(ar);
-                });
-                return;
-            }
-            vertx.fileSystem().readFile(activeConfigPath(), fileAr -> {
-                if (fileAr.failed()) {
+        String file = activeConfigPath();
+        return future((Future<Boolean> fut) -> vertx.fileSystem().exists(file, fut))
+                .recover(describeFailure("Error checking previous config " + file))
+                .compose(exists ->
+                        exists ? readConf(file) : future((Future<AcmeConfig> fut) -> {
+                            AcmeConfig emptyConf = new AcmeConfig();
+                            emptyConf.accounts = emptyMap();
+                            fut.complete(emptyConf);
+                        }))
+                .compose(conf ->
+                    configManager.update(null, conf).compose(v -> doneUpdating(conf)))
+                .map(v -> {
+                    synchronized (AcmeManager.this) {
+                        state = State.OK;
+                    }
+                    return v;
+                }).recover(t -> {
                     synchronized (AcmeManager.this) {
                         state = State.FAILED;
                     }
-                    startArh.handle(failedFuture(new RuntimeException("Error loading previous config", fileAr.cause())));
-                    return;
-                }
-                vertx.<AcmeConfig>executeBlocking(fut -> {
+                    return failedFuture(t);
+                });
+    }
+
+    private <T> Function<Throwable, Future<T>> describeFailure(String msg) {
+        return t -> failedFuture(new RuntimeException(msg, t));
+    }
+
+    private Future<AcmeConfig> readConf(final String file) {
+        return future((Future<Buffer> fut) -> vertx.fileSystem().readFile(file, fut))
+                .recover(t -> failedFuture(new RuntimeException("Error loading previous config " + file, t)))
+                .compose(buf -> executeBlocking(fut -> {
                     try {
                         ObjectMapper objectMapper = new ObjectMapper();
-                        fut.complete(objectMapper.readValue(fileAr.result().getBytes(), AcmeConfig.class));
+                        fut.complete(objectMapper.readValue(buf.getBytes(), AcmeConfig.class));
                     } catch (IOException e) {
-                        fut.fail(e);
+                        fut.fail(new RuntimeException("Previous config file " + file + " broken", e));
                     }
-                }, readConf -> {
-                    if (readConf.failed()) {
-                        synchronized (AcmeManager.this) {
-                            state = State.FAILED;
-                        }
-                        startArh.handle(readConf.mapEmpty());
-                        return;
-                    }
-                    startWithConfig(readConf.result(), ar -> {
-                        startArh.handle(ar);
-                    });
-                });
-            });
-        });
+                }));
     }
 
     enum State { NOT_STARTED, UPDATING, OK, FAILED }
 
     private State state = State.NOT_STARTED;
 
-    public void reconfigure(AcmeConfig conf, Handler<AsyncResult<Void>> completionHandler) {
+    public Future<Void> reconfigure(AcmeConfig conf) {
         synchronized (AcmeManager.this) {
             if (state != State.OK) {
                 throw new IllegalStateException("Wrong state " + state);
@@ -655,29 +651,29 @@ public class AcmeManager {
         final AcmeConfig conf2 = conf.clone();
         // TODO if something goes wrong on account level, continue with other accounts before failing
         // TODO likewise for certificate level
-        configManager.update(cur, conf2, ar -> {
-            if (ar.succeeded()) {
-                cur = conf2;
-                writeConf();
-            }
-            synchronized (AcmeManager.this) {
-                state = State.OK;
-            }
-            completionHandler.handle(ar);
-        });
+        return configManager.update(cur, conf2)
+                .compose(v -> doneUpdating(conf2))
+                .map(v -> {
+                    synchronized (AcmeManager.this) {
+                        state = State.OK;
+                    }
+                    return v;
+                }).recover(t -> {
+                    synchronized (AcmeManager.this) {
+                        state = State.FAILED;
+                    }
+                    return failedFuture(t);
+                });
+
     }
 
-    private void startWithConfig(AcmeConfig conf, Handler<AsyncResult<Void>> startArh) {
-        configManager.update(null, conf, ar -> {
-            if (ar.succeeded()) {
-                cur = conf;
-                writeConf();
-            }
-            synchronized (AcmeManager.this) {
-                state = ar.failed() ? State.FAILED : State.OK;
-            }
-            startArh.handle(ar);
-        });
+    private Future<Void> doneUpdating(AcmeConfig conf2) {
+        cur = conf2;
+        return writeConf(conf2);
+    }
+
+    private Future<Void> writeConf(AcmeConfig newConf) {
+        return failedFuture("TODO");
     }
 
     private static <K, V> List<MapDiff<K,V>> mapDiff(final Map<K, V> old, final Map<K, V> nev) {
