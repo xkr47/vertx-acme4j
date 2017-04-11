@@ -217,6 +217,7 @@ public class AcmeManager {
 
         private Future<Authorization> getAuthorization(String domain) {
             return (authorizations != null ? succeededFuture(authorizations) : executeBlocking((Future<Map<String, Authorization>> fut) -> {
+                logger.info("Fetching authorizations");
                 fut.complete(authorizations = new AbstractCollection<Authorization>() {
                     @Override
                     public Iterator<Authorization> iterator() {
@@ -235,6 +236,7 @@ public class AcmeManager {
             })).compose(fut -> {
                 Authorization authorization = authorizations.get(domain);
                 return authorization != null ? succeededFuture(authorization) : executeBlocking((Future<Authorization> fut2) -> {
+                    logger.info("Authorizing " + domain);
                     try {
                         fut2.complete(registration.authorizeDomain(domain));
                     } catch (AcmeException e) {
@@ -334,6 +336,7 @@ public class AcmeManager {
                     }
                     editableRegistration.setAgreement(URI.create(account.acceptedAgreementUrl));
                     return executeBlocking(fut -> {
+                        logger.info("Updating account");
                         try {
                             editableRegistration.commit();
                             future((Future<Void> fut2) -> vertx.fileSystem().writeFile(acceptedTermsLocationFile, buffer(account.acceptedAgreementUrl), fut2))
@@ -391,17 +394,21 @@ public class AcmeManager {
             return join(asList(certificateFileExists, privateKeyFileExists).stream()).compose(x ->
                     succeededFuture(certificateFileExists.result() && privateKeyFileExists.result())).compose(filesExist -> {
                 if (!filesExist) {
+                    logger.info("No existing certificate & private key");
                     // some files missing, can't use cached data
                     return succeededFuture();
                 }
+                logger.info("Loading existing certificate & private key");
                 Future<Buffer> certificateFut = future((Future<Buffer> fut) -> vertx.fileSystem().readFile(certificateFile, fut))
                         .recover(describeFailure("Certificate file read"));
                 Future<Buffer> privateKeyFut = future((Future<Buffer> fut) -> vertx.fileSystem().readFile(privateKeyFile, fut))
                         .recover(describeFailure("Private key file read"));
                 return executeBlocking((Future<Void> fut) -> {
+                    logger.info("Parsing existing certificate & private key");
                     X509Certificate[] certChain = PemLoader.loadCerts(certificateFut.result());
                     PrivateKey privateKey = PemLoader.loadPrivateKey(privateKeyFut.result());
                     // TODO consider filtering subset of hostnames to be served
+                    logger.info("Installing existing certificate & private key");
                     dynamicCertManager.put(fullCertificateId, privateKey, certChain);
                     fut.complete();
                 });
@@ -512,7 +519,7 @@ public class AcmeManager {
                                 logger.info("Requesting certificate chain..");
                                 return fetchWithRetry(() -> certificate.downloadChain())
                                         .recover(describeFailure("Certificate chain download")).compose(chain -> {
-                                    logger.info("Saving certificate chain");
+                                    logger.info("Serializing certificate chain");
                                     return executeBlocking((Future<Buffer> writeCert) -> {
                                         try {
                                             StringWriter certSw = new StringWriter();
@@ -521,13 +528,15 @@ public class AcmeManager {
                                         } catch (IOException e) {
                                             writeCert.fail(e);
                                         }
-                                    }).compose(certBuffer ->
-                                            future((Future<Void> fut4) -> vertx.fileSystem().writeFile(certificateFile, certBuffer, fut4))
+                                    }).compose(certBuffer -> {
+                                            logger.info("Saving certificate chain");
+                                            return future((Future<Void> fut4) -> vertx.fileSystem().writeFile(certificateFile, certBuffer, fut4))
                                                     .recover(describeFailure("Certificate file write")).compose(vv -> {
                                                 logger.info("Installing certificate");
                                                 dynamicCertManager.put("letsencrypt-cert-" + certificateId, domainKeyPair.getPrivate(), cert, chain);
                                                 return Future.<Void>succeededFuture();
-                                            }));
+                                            });
+                                    });
                                 });
                             });
                         });
@@ -546,9 +555,11 @@ public class AcmeManager {
 
         private Future<Void> executeChallenge(String domainName, Challenge challenge) {
             return executeBlocking((Future<String> fut) -> {
+                logger.info("Creating challenge keypair");
                 try {
                     KeyPair sniKeyPair = KeyPairUtils.createKeyPair(4096);
                     X509Certificate cert;
+                    logger.info("Creating challenge certificate");
                     switch (challenge.getType()) {
                         case TlsSni01Challenge.TYPE: {
                             TlsSni01Challenge c = (TlsSni01Challenge) challenge;
@@ -564,6 +575,7 @@ public class AcmeManager {
                             throw new UnsupportedOperationException("Internal error, unsupported challenge type " + challenge.getType());
                     }
                     final String id = "letsencrypt-challenge-" + domainName;
+                    logger.info("Installing challenge certificate");
                     dynamicCertManager.put(id, sniKeyPair.getPrivate(), cert);
                     logger.info("Challenge {} prepared, executing..", challenge.getType());
                     challenge.trigger();
@@ -744,6 +756,7 @@ public class AcmeManager {
                         });
             } else {
                 // file doesn't exist
+                logger.info("Creating new " + type + " keypair");
                 return creator.get().compose(createdKeyPair -> AsyncKeyPairUtils.writeKeyPair(vertx, createdKeyPair)
                         .compose(keyPairSerialized -> future((Future<Void> fut) -> vertx.fileSystem().writeFile(keyPairFile, keyPairSerialized, fut))
                                 .recover(describeFailure("Keypar for " + type + " file write")))
@@ -776,7 +789,7 @@ public class AcmeManager {
                 return;
             }
             long nextSleep = ar.succeeded() ? 3000 : ((AcmeRetryAfterException) ar.cause()).getRetryAfter().getTime() - currentTimeMillis();
-            logger.info("Recheck in {}ms", nextSleep);
+            logger.info("Recheck in {}ms @ {}", nextSleep, new Date(System.currentTimeMillis() + nextSleep));
             vertx.setTimer(nextSleep, timerId -> fetchWithRetry(blockingHandler, done));
         });
     }
