@@ -260,10 +260,12 @@ public class AcmeManager {
             // TODO update registration when agreement, contact or others change (save to file what were last used values)
             String domainAccountLocationFile = dbPath + accountDbId + '-' + DOMAIN_ACCOUNT_LOCATION_FILE;
             final List<String> contactURIs = account.contactURIs == null ? Collections.emptyList() : account.contactURIs;
-            return future((Future<Boolean> fut) -> vertx.fileSystem().exists(domainAccountLocationFile, fut)).compose((Boolean keyFileExists) -> {
+            return future((Future<Boolean> fut) -> vertx.fileSystem().exists(domainAccountLocationFile, fut)).recover(
+                    describeFailure("Domain account location file check")).compose((Boolean keyFileExists) -> {
                 if (keyFileExists) {
                     logger.info("Domain account location file " + domainAccountLocationFile + " exists, using..");
-                    return future((Future<Buffer> fut) -> vertx.fileSystem().readFile(domainAccountLocationFile, fut)).compose(domainAccountLocation -> {
+                    return future((Future<Buffer> fut) -> vertx.fileSystem().readFile(domainAccountLocationFile, fut)).recover(
+                            describeFailure("Domain account location file read")).compose(domainAccountLocation -> {
                         String locationStr = domainAccountLocation.toString();
                         logger.info("Domain account location: " + locationStr);
                         URI location;
@@ -300,6 +302,7 @@ public class AcmeManager {
                         createFut.complete(new SimpleEntry<>(registration, created));
                     }).compose(creation -> future((Future<Void> fut) ->
                             vertx.fileSystem().writeFile(domainAccountLocationFile, buffer(creation.getKey().getLocation().toASCIIString()), fut))
+                            .recover(describeFailure("Domain account location file write"))
                             .map(v -> {
                                 logger.info("Domain account location file " + domainAccountLocationFile + " saved");
                                 return creation;
@@ -311,9 +314,11 @@ public class AcmeManager {
                 String acceptedTermsLocationFile = dbPath + accountDbId + '-' + ACCEPTED_TERMS_LOCATION_FILE;
                 boolean contactsChanged = !created && !registration.getContacts().equals(account.contactURIs.stream().map(URI::create).collect(Collectors.toList()));
                 return (contactsChanged || created ? succeededFuture(true) :
-                        future((Future<Boolean> fut) -> vertx.fileSystem().exists(acceptedTermsLocationFile, fut)).compose(termsFileExists ->
+                        future((Future<Boolean> fut) -> vertx.fileSystem().exists(acceptedTermsLocationFile, fut)).recover(
+                                describeFailure("Accepted terms location file check")).compose(termsFileExists ->
                                 !termsFileExists ? succeededFuture(true) :
-                                        future((Future<Buffer> fut) -> vertx.fileSystem().readFile(acceptedTermsLocationFile, fut)).map(buf ->
+                                        future((Future<Buffer> fut) -> vertx.fileSystem().readFile(acceptedTermsLocationFile, fut)).recover(
+                                                describeFailure("Accepted terms location file read")).map(buf ->
                                                 !buf.toString().equals(account.acceptedAgreementUrl)))
                 ).compose(registrationPropsChanged -> {
                     if (!registrationPropsChanged) {
@@ -329,8 +334,10 @@ public class AcmeManager {
                     return executeBlocking(fut -> {
                         try {
                             editableRegistration.commit();
-                            vertx.fileSystem().writeFile(acceptedTermsLocationFile, buffer(account.acceptedAgreementUrl), ar ->
-                                    fut.handle(ar.map(registration)));
+                            future((Future<Void> fut2) -> vertx.fileSystem().writeFile(acceptedTermsLocationFile, buffer(account.acceptedAgreementUrl), fut2))
+                                    .recover(describeFailure("Accepted terms location file write"))
+                                    .map(registration)
+                                    .setHandler(fut);
                         } catch (AcmeException e) {
                             fut.fail(e);
                         }
@@ -375,16 +382,20 @@ public class AcmeManager {
                 // already loaded
                 return succeededFuture();
             }
-            final Future<Boolean> certificateFileExists = future((Future<Boolean> fut) -> vertx.fileSystem().exists(certificateFile, fut));
-            final Future<Boolean> privateKeyFileExists = future((Future<Boolean> fut) -> vertx.fileSystem().exists(privateKeyFile, fut));
+            final Future<Boolean> certificateFileExists = future((Future<Boolean> fut) -> vertx.fileSystem().exists(certificateFile, fut))
+                    .recover(describeFailure("Certificate file check"));
+            final Future<Boolean> privateKeyFileExists = future((Future<Boolean> fut) -> vertx.fileSystem().exists(privateKeyFile, fut))
+                    .recover(describeFailure("Private key file check"));
             return join(asList(certificateFileExists, privateKeyFileExists).stream()).compose(x ->
                     succeededFuture(certificateFileExists.result() && privateKeyFileExists.result())).compose(filesExist -> {
                 if (!filesExist) {
                     // some files missing, can't use cached data
                     return succeededFuture();
                 }
-                Future<Buffer> certificateFut = future((Future<Buffer> fut) -> vertx.fileSystem().readFile(certificateFile, fut));
-                Future<Buffer> privateKeyFut = future((Future<Buffer> fut) -> vertx.fileSystem().readFile(privateKeyFile, fut));
+                Future<Buffer> certificateFut = future((Future<Buffer> fut) -> vertx.fileSystem().readFile(certificateFile, fut))
+                        .recover(describeFailure("Certificate file read"));
+                Future<Buffer> privateKeyFut = future((Future<Buffer> fut) -> vertx.fileSystem().readFile(privateKeyFile, fut))
+                        .recover(describeFailure("Private key file read"));
                 return executeBlocking((Future<Void> fut) -> {
                     X509Certificate[] certChain = PemLoader.loadCerts(certificateFut.result());
                     PrivateKey privateKey = PemLoader.loadPrivateKey(privateKeyFut.result());
@@ -489,13 +500,16 @@ public class AcmeManager {
                     future((Future<Void> fut2) -> {
                         String csrFile = dbPath + accountDbId + "-" + certificateId + "-cert-request.csr";
                         vertx.fileSystem().writeFile(csrFile, buffer, fut2);
-                    }).compose(v -> {
+                    }).recover(describeFailure("Certificate Request file write")).compose(v -> {
                         logger.info("Requesting certificate meta..");
-                        return fetchWithRetry(() -> registration.requestCertificate(csrb.getEncoded())).compose(certificate -> {
+                        return fetchWithRetry(() -> registration.requestCertificate(csrb.getEncoded()))
+                                .recover(describeFailure("Certificate request")).compose(certificate -> {
                             logger.info("Requesting certificate..");
-                            return fetchWithRetry(() -> certificate.download()).compose(cert -> {
+                            return fetchWithRetry(() -> certificate.download())
+                                    .recover(describeFailure("Certificate download")).compose(cert -> {
                                 logger.info("Requesting certificate chain..");
-                                return fetchWithRetry(() -> certificate.downloadChain()).compose(chain -> {
+                                return fetchWithRetry(() -> certificate.downloadChain())
+                                        .recover(describeFailure("Certificate chain download")).compose(chain -> {
                                     logger.info("Saving certificate chain");
                                     return executeBlocking((Future<Buffer> writeCert) -> {
                                         try {
@@ -506,7 +520,8 @@ public class AcmeManager {
                                             writeCert.fail(e);
                                         }
                                     }).compose(certBuffer ->
-                                            future((Future<Void> fut4) -> vertx.fileSystem().writeFile(certificateFile, certBuffer, fut4)).compose(vv -> {
+                                            future((Future<Void> fut4) -> vertx.fileSystem().writeFile(certificateFile, certBuffer, fut4))
+                                                    .recover(describeFailure("Certificate file write")).compose(vv -> {
                                                 logger.info("Installing certificate");
                                                 dynamicCertManager.put("letsencrypt-cert-" + certificateId, domainKeyPair.getPrivate(), cert, chain);
                                                 return Future.<Void>succeededFuture();
@@ -593,26 +608,28 @@ public class AcmeManager {
     }
 
     public Future<Void> start() {
-        if (state != State.NOT_STARTED) {
-            throw new IllegalStateException("Already started");
-        }
-        synchronized (AcmeManager.this) {
-            state = State.UPDATING;
-        }
-        String file = activeConfigPath();
-        return doUpdate(future((Future<Boolean> fut) -> vertx.fileSystem().exists(file, fut))
-                .recover(describeFailure("Error checking previous config " + file))
-                .compose(exists ->
-                        exists ? readConf(file) : future((Future<AcmeConfig> fut) -> {
-                            AcmeConfig emptyConf = new AcmeConfig();
-                            emptyConf.accounts = emptyMap();
-                            fut.complete(emptyConf);
-                        })));
+        return initDb().compose(v -> {
+            if (state != State.NOT_STARTED) {
+                throw new IllegalStateException("Already started");
+            }
+            synchronized (AcmeManager.this) {
+                state = State.UPDATING;
+            }
+            String file = activeConfigPath();
+            return doUpdate(future((Future<Boolean> fut) -> vertx.fileSystem().exists(file, fut))
+                    .recover(describeFailure("Error checking previous config " + file))
+                    .compose(exists ->
+                            exists ? readConf(file) : future((Future<AcmeConfig> fut) -> {
+                                AcmeConfig emptyConf = new AcmeConfig();
+                                emptyConf.accounts = emptyMap();
+                                fut.complete(emptyConf);
+                            })));
+        });
     }
 
 
     public Future<Void> start(AcmeConfig conf) {
-        return configure(State.NOT_STARTED, conf);
+        return initDb().compose(v -> configure(State.NOT_STARTED, conf));
     }
 
     public Future<Void> reconfigure(AcmeConfig conf) {
@@ -651,6 +668,11 @@ public class AcmeManager {
                 });
     }
 
+    private Future<Void> initDb() {
+        return future((Future<Void> fut) -> vertx.fileSystem().mkdirs(dbPath, fut))
+                .recover(describeFailure("DB directory create"));
+    }
+
     private Future<AcmeConfig> readConf(final String file) {
         return future((Future<Buffer> fut) -> vertx.fileSystem().readFile(file, fut))
                 .recover(describeFailure("Error loading previous config " + file))
@@ -671,7 +693,8 @@ public class AcmeManager {
             } catch (JsonProcessingException e) {
                 fut.fail(e);
             }
-        })).compose(buf -> future((Future<Void> fut) -> vertx.fileSystem().writeFile(file, buf, fut)));
+        })).compose(buf -> future((Future<Void> fut) -> vertx.fileSystem().writeFile(file, buf, fut))
+                .recover(describeFailure("Active config file write")));
     }
 
     private static <K, V> List<MapDiff<K,V>> mapDiff(final Map<K, V> old, final Map<K, V> nev) {
@@ -691,10 +714,12 @@ public class AcmeManager {
     }
 
     Future<KeyPair> getOrCreateKeyPair(String type, final String keyPairFile, final Supplier<Future<KeyPair>> creator) {
-        return future((Future<Boolean> fut) -> vertx.fileSystem().exists(keyPairFile, fut)).compose(keyFileExists -> {
+        return future((Future<Boolean> fut) -> vertx.fileSystem().exists(keyPairFile, fut))
+                .recover(describeFailure("Keypair for " + type + " file check")).compose(keyFileExists -> {
             if (keyFileExists) {
                 // file exists
                 return future((Future<Buffer> fut) -> vertx.fileSystem().readFile(keyPairFile, fut))
+                        .recover(describeFailure("Keypair for " + type + " file read"))
                         .compose(existingKeyFile -> AsyncKeyPairUtils.readKeyPair(vertx, existingKeyFile))
                         .map((KeyPair readKeyPair) -> {
                             logger.info("Existing " + type + " keypair read from " + keyPairFile);
@@ -703,7 +728,8 @@ public class AcmeManager {
             } else {
                 // file doesn't exist
                 return creator.get().compose(createdKeyPair -> AsyncKeyPairUtils.writeKeyPair(vertx, createdKeyPair)
-                        .compose(keyPairSerialized -> future((Future<Void> fut) -> vertx.fileSystem().writeFile(keyPairFile, keyPairSerialized, fut)))
+                        .compose(keyPairSerialized -> future((Future<Void> fut) -> vertx.fileSystem().writeFile(keyPairFile, keyPairSerialized, fut))
+                                .recover(describeFailure("Keypar for " + type + " file write")))
                         .map(v -> {
                             logger.info("New " + type + " keypair written to " + keyPairFile);
                             return createdKeyPair;
