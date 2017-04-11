@@ -73,7 +73,8 @@ import static java.util.stream.Collectors.toList;
 public class AcmeManager {
 
     static final String ACCOUNT_KEY_PAIR_FILE = "account-keypair.pem";
-    static final String CERTIFICATE_KEY_PAIR_FILE = "certificate-keypair.pem";
+    static final String CERTIFICATE_KEY_PAIR_FILE = "keypair.pem";
+    static final String CERTIFICATE_CHAIN_FILE = "certchain.pem";
     static final String DOMAIN_ACCOUNT_LOCATION_FILE = "accountLocation.txt";
     static final String ACCEPTED_TERMS_LOCATION_FILE = "acceptedTermsLocation.txt";
     static final String ACTIVE_CONF_PATH = "active.json";
@@ -361,7 +362,7 @@ public class AcmeManager {
         final String fullCertificateId;
         final AcmeConfig.Certificate oldC;
         final AcmeConfig.Certificate newC;
-        final String privateKeyFile;
+        final String keyPairFile;
         final String certificateFile;
 
         public CertificateManager(Registration registration, String accountDbId, int minimumValidityDays, Function<String, Future<Authorization>> getAuthorization, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) {
@@ -373,8 +374,8 @@ public class AcmeManager {
             this.fullCertificateId = accountDbId + "-" + certificateId;
             this.oldC = oldC;
             this.newC = newC;
-            privateKeyFile = dbPath + accountDbId + "-" + certificateId + "-key.pem";
-            certificateFile = dbPath + accountDbId + "-" + certificateId + "-certchain.pem";
+            keyPairFile = dbPath + accountDbId + "-" + certificateId + "-" + CERTIFICATE_KEY_PAIR_FILE;
+            certificateFile = dbPath + accountDbId + "-" + certificateId + "-" + CERTIFICATE_CHAIN_FILE;
         }
 
         public Future<Void> updateCached() {
@@ -389,28 +390,29 @@ public class AcmeManager {
             }
             final Future<Boolean> certificateFileExists = future((Future<Boolean> fut) -> vertx.fileSystem().exists(certificateFile, fut))
                     .recover(describeFailure("Certificate file check"));
-            final Future<Boolean> privateKeyFileExists = future((Future<Boolean> fut) -> vertx.fileSystem().exists(privateKeyFile, fut))
-                    .recover(describeFailure("Private key file check"));
-            return join(asList(certificateFileExists, privateKeyFileExists).stream()).compose(x ->
-                    succeededFuture(certificateFileExists.result() && privateKeyFileExists.result())).compose(filesExist -> {
+            final Future<Boolean> keyPairFileExists = future((Future<Boolean> fut) -> vertx.fileSystem().exists(keyPairFile, fut))
+                    .recover(describeFailure("KeyPair file check"));
+            return join(asList(certificateFileExists, keyPairFileExists).stream()).compose(x ->
+                    succeededFuture(certificateFileExists.result() && keyPairFileExists.result())).compose(filesExist -> {
                 if (!filesExist) {
-                    logger.info("No existing certificate & private key");
+                    logger.info("No existing certificate & KeyPair");
                     // some files missing, can't use cached data
                     return succeededFuture();
                 }
-                logger.info("Loading existing certificate & private key");
+                logger.info("Loading existing certificate & KeyPair");
                 Future<Buffer> certificateFut = future((Future<Buffer> fut) -> vertx.fileSystem().readFile(certificateFile, fut))
                         .recover(describeFailure("Certificate file read"));
-                Future<Buffer> privateKeyFut = future((Future<Buffer> fut) -> vertx.fileSystem().readFile(privateKeyFile, fut))
-                        .recover(describeFailure("Private key file read"));
+                Future<Buffer> keyPairFut = future((Future<Buffer> fut) -> vertx.fileSystem().readFile(keyPairFile, fut))
+                        .recover(describeFailure("KeyPair file read"));
                 return executeBlocking((Future<Void> fut) -> {
-                    logger.info("Parsing existing certificate & private key");
+                    logger.info("Parsing existing certificate & KeyPair");
                     X509Certificate[] certChain = PemLoader.loadCerts(certificateFut.result());
-                    PrivateKey privateKey = PemLoader.loadPrivateKey(privateKeyFut.result());
-                    // TODO consider filtering subset of hostnames to be served
-                    logger.info("Installing existing certificate & private key");
-                    dynamicCertManager.put(fullCertificateId, privateKey, certChain);
-                    fut.complete();
+
+                    AsyncKeyPairUtils.readKeyPair(vertx, keyPairFut.result()).compose(keyPair -> {
+                        // TODO consider filtering subset of hostnames to be served
+                        logger.info("Installing existing certificate & KeyPair");
+                        dynamicCertManager.put(fullCertificateId, keyPair.getPrivate(), certChain);
+                    }).setHandler(fut);
                 });
             });
         }
@@ -467,7 +469,7 @@ public class AcmeManager {
                     }))
                     .compose(v -> {
                         logger.info("All domains successfully authorized by account");
-                        return createCertificate(registration, accountDbId, certificateId, privateKeyFile, certificateFile, newC.hostnames, newC.organization).map(w -> {
+                        return createCertificate(registration, accountDbId, certificateId, keyPairFile, certificateFile, newC.hostnames, newC.organization).map(w -> {
                             logger.info("Certificate successfully activated. All done.");
                             return w;
                         });
@@ -480,17 +482,14 @@ public class AcmeManager {
             }
         }
 
-        private Future<KeyPair> getOrCreateCertificateKeyPair() {
-            String certificateKeyPairFile = dbPath + accountDbId + '-' + certificateId + "-" + CERTIFICATE_KEY_PAIR_FILE;
+        private Future<KeyPair> getOrCreateCertificateKeyPair(String keyPairFile) {
             //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
-            return getOrCreateKeyPair("certificate", certificateKeyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
+            return getOrCreateKeyPair("certificate", keyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
         }
 
-        private Future<Void> createCertificate(Registration registration, String accountDbId, String certificateId, String privateKeyFile, String certificateFile, List<String> domainNames, String organization) {
-            logger.info("Creating private key");
-            return getOrCreateCertificateKeyPair().compose(domainKeyPair -> executeBlocking((Future<Void> fut) -> {
-                // write(privateKeyFile, w -> writePrivateKey(domainKeyPair.getPrivate(), w));
-
+        private Future<Void> createCertificate(Registration registration, String accountDbId, String certificateId, String keyPairFile, String certificateFile, List<String> domainNames, String organization) {
+            logger.info("Creating keyPair");
+            return getOrCreateCertificateKeyPair(keyPairFile).compose(domainKeyPair -> executeBlocking((Future<Void> fut) -> {
                 final CSRBuilder csrb;
                 try {
                     logger.info("Creating certificate request (CSR)");
