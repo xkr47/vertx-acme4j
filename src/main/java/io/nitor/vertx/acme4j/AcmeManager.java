@@ -108,14 +108,14 @@ public class AcmeManager {
                         final Future<Void> cur = future();
                         am.updateCached().setHandler(ar1 -> {
                             if (ar1.failed()) {
-                                logger.error("While handling account " + account.key, ar1.cause());
-                                prev.setHandler(cur);
+                                logger.error("Error updating account using cached data", new RuntimeException("For account " + account.key, ar1.cause()));
+                                prev.compose(v -> Future.<Void>failedFuture("Some account(s) failed")).setHandler(cur);
                                 return;
                             }
                             prev.setHandler(prevResult ->
                                     am.updateOthers().setHandler(ar2 -> {
                                         if (ar2.failed()) {
-                                            logger.error("While handling account " + account.key, ar2.cause());
+                                            logger.error("Error updating account", new RuntimeException("For account " + account.key, ar2.cause()));
                                             cur.fail("Some account(s) failed");
                                             return;
                                         }
@@ -230,7 +230,7 @@ public class AcmeManager {
 
                     @Override
                     public int size() {
-                        throw new UnsupportedOperationException();
+                        return Integer.MAX_VALUE;
                     }
                 }.stream().collect(Collectors.toMap(Authorization::getDomain, t -> t)));
             })).compose(fut -> {
@@ -419,7 +419,7 @@ public class AcmeManager {
             if (newC == null) {
                 return succeededFuture();
             }
-            if (oldC.equals(newC)) {
+            if (oldC != null && oldC.equals(newC)) {
                 // certificate is configuration-wise up-to-date
                 CertCombo certCombo = dynamicCertManager.get(fullCertificateId);
                 if (certCombo != null) {
