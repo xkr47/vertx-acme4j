@@ -78,8 +78,8 @@ public class TestApp extends AbstractVerticle
 
         DynamicCertManager certManager = new DynamicCertManager(vertx, dynamicCertOptions, "default");
 
-        AcmeManager acmeMgr = new AcmeManager(vertx, certManager, "acmedb");
-        acmeMgr.start(ar -> {
+        AcmeManager acmeMgr = new AcmeManager(vertx, certManager, ".acmemanager");
+        acmeMgr.start().setHandler(ar -> {
             if (ar.failed()) {
                 logger.error("AcmeManager start failed", ar.cause());
                 return;

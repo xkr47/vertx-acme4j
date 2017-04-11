@@ -15,11 +15,11 @@
  */
 package io.nitor.vertx.acme4j.tls;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
 import io.nitor.vertx.acme4j.tls.AcmeConfig.Account;
 import io.nitor.vertx.acme4j.tls.DynamicCertManager.CertCombo;
-import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
@@ -85,6 +85,9 @@ public class AcmeManager {
     private final String dbPath;
     private final AcmeConfigManager configManager = new AcmeConfigManager();
     private AcmeConfig cur;
+
+    enum State { NOT_STARTED, UPDATING, OK, FAILED }
+    private State state = State.NOT_STARTED;
 
     public AcmeManager(Vertx vertx, DynamicCertManager dynamicCertManager, String dbPath) {
         this.vertx = vertx;
@@ -165,7 +168,7 @@ public class AcmeManager {
                     .stream()
                     .map((certificate) -> {
                         final CertificateManager cm = new CertificateManager(null, accountDbId, newA.minimumValidityDays, null, certificate.key, certificate.oldValue, certificate.newValue);
-                        return cm.updateCached().recover(t -> failedFuture(new RuntimeException("For certificate " + certificate.key, t)));
+                        return cm.updateCached().recover(describeFailure("For certificate " + certificate.key));
                     });
             return join(futures);
         }
@@ -203,7 +206,7 @@ public class AcmeManager {
                             .stream()
                             .map((certificate) -> {
                                 final CertificateManager cm = new CertificateManager(registration, newAccountDbId, newAOrig.minimumValidityDays, this::getAuthorization, certificate.key, certificate.oldValue, certificate.newValue);
-                                return cm.updateOthers().recover(t -> failedFuture(new RuntimeException("For certificate " + certificate.key, t)));
+                                return cm.updateOthers().recover(describeFailure("For certificate " + certificate.key));
                             });
                     return join(futures);
                 });
@@ -607,9 +610,34 @@ public class AcmeManager {
                         })));
     }
 
+
+    public Future<Void> start(AcmeConfig conf) {
+        return configure(State.NOT_STARTED, conf);
+    }
+
+    public Future<Void> reconfigure(AcmeConfig conf) {
+        return configure(State.OK, conf);
+    }
+
+    private Future<Void> configure(State expectedState, AcmeConfig conf) {
+        synchronized (AcmeManager.this) {
+            if (state != expectedState) {
+                throw new IllegalStateException("Wrong state " + state);
+            }
+            state = State.UPDATING;
+        }
+        final AcmeConfig conf2 = conf.clone();
+        // TODO if something goes wrong on account level, continue with other accounts before failing
+        // TODO likewise for certificate level
+        return doUpdate(succeededFuture(conf2));
+    }
+
     Future<Void> doUpdate(Future<AcmeConfig> confFut) {
         return confFut.compose(conf ->
-                configManager.update(cur, conf).compose(v -> doneUpdating(conf)))
+                configManager.update(cur, conf).compose(v -> {
+                    cur = conf;
+                    return writeConf(activeConfigPath(), conf);
+                }))
                 .map(v -> {
                     synchronized (AcmeManager.this) {
                         state = State.OK;
@@ -623,13 +651,9 @@ public class AcmeManager {
                 });
     }
 
-    private <T> Function<Throwable, Future<T>> describeFailure(String msg) {
-        return t -> failedFuture(new RuntimeException(msg, t));
-    }
-
     private Future<AcmeConfig> readConf(final String file) {
         return future((Future<Buffer> fut) -> vertx.fileSystem().readFile(file, fut))
-                .recover(t -> failedFuture(new RuntimeException("Error loading previous config " + file, t)))
+                .recover(describeFailure("Error loading previous config " + file))
                 .compose(buf -> executeBlocking(fut -> {
                     try {
                         ObjectMapper objectMapper = new ObjectMapper();
@@ -640,30 +664,14 @@ public class AcmeManager {
                 }));
     }
 
-    enum State { NOT_STARTED, UPDATING, OK, FAILED }
-
-    private State state = State.NOT_STARTED;
-
-    public Future<Void> reconfigure(AcmeConfig conf) {
-        synchronized (AcmeManager.this) {
-            if (state != State.OK) {
-                throw new IllegalStateException("Wrong state " + state);
+    private Future<Void> writeConf(final String file, final AcmeConfig newConf) {
+        return executeBlocking(((Future<Buffer> fut) -> {
+            try {
+                fut.complete(buffer(new ObjectMapper().writeValueAsBytes(newConf)));
+            } catch (JsonProcessingException e) {
+                fut.fail(e);
             }
-            state = State.UPDATING;
-        }
-        final AcmeConfig conf2 = conf.clone();
-        // TODO if something goes wrong on account level, continue with other accounts before failing
-        // TODO likewise for certificate level
-        return doUpdate(succeededFuture(conf2));
-    }
-
-    private Future<Void> doneUpdating(AcmeConfig conf2) {
-        cur = conf2;
-        return writeConf(conf2);
-    }
-
-    private Future<Void> writeConf(AcmeConfig newConf) {
-        return failedFuture("TODO");
+        })).compose(buf -> future((Future<Void> fut) -> vertx.fileSystem().writeFile(file, buf, fut)));
     }
 
     private static <K, V> List<MapDiff<K,V>> mapDiff(final Map<K, V> old, final Map<K, V> nev) {
@@ -676,6 +684,10 @@ public class AcmeManager {
                 .collect(toList());
         res.addAll(res2);
         return res;
+    }
+
+    private <T> Function<Throwable, Future<T>> describeFailure(String msg) {
+        return t -> failedFuture(new RuntimeException(msg, t));
     }
 
     Future<KeyPair> getOrCreateKeyPair(String type, final String keyPairFile, final Supplier<Future<KeyPair>> creator) {
