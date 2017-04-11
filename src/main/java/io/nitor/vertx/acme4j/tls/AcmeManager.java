@@ -607,6 +607,11 @@ public class AcmeManager {
         return dbPath + ACTIVE_CONF_PATH;
     }
 
+    /**
+     * Start up with previous config, or empty config if no previous config exists.
+     *
+     * @return A future that can be monitored for completion of startup.
+     */
     public Future<Void> start() {
         return initDb().compose(v -> {
             if (state != State.NOT_STARTED) {
@@ -628,10 +633,20 @@ public class AcmeManager {
     }
 
 
+    /**
+     * Start up with given config.
+     *
+     * @return A future that can be monitored for completion of startup.
+     */
     public Future<Void> start(AcmeConfig conf) {
         return initDb().compose(v -> configure(State.NOT_STARTED, conf));
     }
 
+    /**
+     * Reconfigure to use given config.
+     *
+     * @return A future that can be monitored for completion of reconfiguration.
+     */
     public Future<Void> reconfigure(AcmeConfig conf) {
         return configure(State.OK, conf);
     }
