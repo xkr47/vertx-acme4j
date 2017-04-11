@@ -13,13 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.nitor.vertx.acme4j.tls;
+package io.nitor.vertx.acme4j;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
-import io.nitor.vertx.acme4j.tls.AcmeConfig.Account;
-import io.nitor.vertx.acme4j.tls.DynamicCertManager.CertCombo;
+import io.nitor.vertx.acme4j.AcmeConfig.Account;
+import io.nitor.vertx.acme4j.util.DynamicCertManager;
+import io.nitor.vertx.acme4j.util.DynamicCertManager.CertCombo;
+import io.nitor.vertx.acme4j.util.MultiException;
+import io.nitor.vertx.acme4j.util.PemLoader;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
@@ -109,16 +112,15 @@ public class AcmeManager {
                                 prev.setHandler(cur);
                                 return;
                             }
-                            prev.setHandler(prevResult -> {
-                                am.updateOthers().setHandler(ar2 -> {
-                                    if (ar2.failed()) {
-                                        logger.error("While handling account " + account.key, ar2.cause());
-                                        cur.fail("Some account(s) failed");
-                                        return;
-                                    }
-                                    cur.handle(prevResult);
-                                });
-                            });
+                            prev.setHandler(prevResult ->
+                                    am.updateOthers().setHandler(ar2 -> {
+                                        if (ar2.failed()) {
+                                            logger.error("While handling account " + account.key, ar2.cause());
+                                            cur.fail("Some account(s) failed");
+                                            return;
+                                        }
+                                        cur.handle(prevResult);
+                            }));
                         });
                         return cur;
                     })

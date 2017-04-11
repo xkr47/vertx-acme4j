@@ -13,7 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.nitor.vertx.acme4j.tls;
+package io.nitor.vertx.acme4j;
+
+import io.nitor.vertx.acme4j.util.Struct;
 
 import java.util.List;
 import java.util.Map;

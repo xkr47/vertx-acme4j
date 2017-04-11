@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2017 Nitor Creations Oy
+ * Copyright 2016-2017 Nitor Creations Oy, Jonas Berlin
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.nitor.vertx.acme4j.tls;
+package io.nitor.vertx.acme4j.util;
 
 import static java.lang.System.err;
 import static java.lang.System.getProperty;

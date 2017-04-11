@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.nitor.vertx.acme4j.tls;
+package io.nitor.vertx.acme4j.util;
 
 import io.vertx.core.Vertx;
 import org.apache.logging.log4j.LogManager;
@@ -35,9 +35,9 @@ public class DynamicCertManager {
     static final Logger logger = LogManager.getLogger(DynamicCertManager.class);
 
     public static class CertCombo {
-        String id; // for removing/updating later
-        Certificate[] certWithChain;
-        PrivateKey key;
+        public final String id; // for removing/updating later
+        public final Certificate[] certWithChain;
+        public final PrivateKey key;
 
         public CertCombo(String id, PrivateKey key, Certificate[] certWithChain) {
             this.id = id;

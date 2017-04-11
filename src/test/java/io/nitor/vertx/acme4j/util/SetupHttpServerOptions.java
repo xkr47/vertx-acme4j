@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.nitor.vertx.acme4j.tls;
+package io.nitor.vertx.acme4j.util;
 
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServerOptions;

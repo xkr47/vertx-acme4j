@@ -15,10 +15,9 @@
  */
 package io.nitor.vertx.acme4j;
 
-import io.nitor.vertx.acme4j.tls.AcmeManager;
-import io.nitor.vertx.acme4j.tls.DynamicCertManager;
-import io.nitor.vertx.acme4j.tls.DynamicCertOptions;
-import io.nitor.vertx.acme4j.tls.SetupHttpServerOptions;
+import io.nitor.vertx.acme4j.util.DynamicCertManager;
+import io.nitor.vertx.acme4j.util.DynamicCertOptions;
+import io.nitor.vertx.acme4j.util.SetupHttpServerOptions;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Launcher;
 import io.vertx.core.http.HttpServerOptions;
