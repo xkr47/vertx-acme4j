@@ -597,16 +597,19 @@ public class AcmeManager {
             state = State.UPDATING;
         }
         String file = activeConfigPath();
-        return future((Future<Boolean> fut) -> vertx.fileSystem().exists(file, fut))
+        return doUpdate(future((Future<Boolean> fut) -> vertx.fileSystem().exists(file, fut))
                 .recover(describeFailure("Error checking previous config " + file))
                 .compose(exists ->
                         exists ? readConf(file) : future((Future<AcmeConfig> fut) -> {
                             AcmeConfig emptyConf = new AcmeConfig();
                             emptyConf.accounts = emptyMap();
                             fut.complete(emptyConf);
-                        }))
-                .compose(conf ->
-                    configManager.update(null, conf).compose(v -> doneUpdating(conf)))
+                        })));
+    }
+
+    Future<Void> doUpdate(Future<AcmeConfig> confFut) {
+        return confFut.compose(conf ->
+                configManager.update(cur, conf).compose(v -> doneUpdating(conf)))
                 .map(v -> {
                     synchronized (AcmeManager.this) {
                         state = State.OK;
@@ -651,20 +654,7 @@ public class AcmeManager {
         final AcmeConfig conf2 = conf.clone();
         // TODO if something goes wrong on account level, continue with other accounts before failing
         // TODO likewise for certificate level
-        return configManager.update(cur, conf2)
-                .compose(v -> doneUpdating(conf2))
-                .map(v -> {
-                    synchronized (AcmeManager.this) {
-                        state = State.OK;
-                    }
-                    return v;
-                }).recover(t -> {
-                    synchronized (AcmeManager.this) {
-                        state = State.FAILED;
-                    }
-                    return failedFuture(t);
-                });
-
+        return doUpdate(succeededFuture(conf2));
     }
 
     private Future<Void> doneUpdating(AcmeConfig conf2) {
