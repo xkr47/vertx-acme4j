@@ -101,17 +101,17 @@ public class DynamicCertOptions implements KeyCertOptions {
 
         @Override
         public String[] getServerAliases(String s, Principal[] principals) {
-            return wrapped.getServerAliases(s, principals);
+            return wrapped == null ? null : wrapped.getServerAliases(s, principals);
         }
 
         @Override
         public X509Certificate[] getCertificateChain(String s) {
-            return wrapped.getCertificateChain(s);
+            return wrapped == null ? null : wrapped.getCertificateChain(s);
         }
 
         @Override
         public PrivateKey getPrivateKey(String s) {
-            return wrapped.getPrivateKey(s);
+            return wrapped == null ? null : wrapped.getPrivateKey(s);
         }
 
         @Override
