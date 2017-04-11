@@ -17,8 +17,8 @@ package io.nitor.vertx.acme4j;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
 import io.nitor.vertx.acme4j.AcmeConfig.Account;
+import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
 import io.nitor.vertx.acme4j.util.DynamicCertManager;
 import io.nitor.vertx.acme4j.util.DynamicCertManager.CertCombo;
 import io.nitor.vertx.acme4j.util.MultiException;
@@ -638,7 +638,7 @@ public class AcmeManager {
             return doUpdate(future((Future<Boolean> fut) -> vertx.fileSystem().exists(file, fut))
                     .recover(describeFailure("Error checking previous config " + file))
                     .compose(exists ->
-                            exists ? readConf(file) : future((Future<AcmeConfig> fut) -> {
+                            exists ? readConf(file, "active") : future((Future<AcmeConfig> fut) -> {
                                 AcmeConfig emptyConf = new AcmeConfig();
                                 emptyConf.accounts = emptyMap();
                                 fut.complete(emptyConf);
@@ -682,7 +682,7 @@ public class AcmeManager {
         return confFut.compose(conf ->
                 configManager.update(cur, conf).compose(v -> {
                     cur = conf;
-                    return writeConf(activeConfigPath(), conf);
+                    return writeConf(activeConfigPath(), "active", conf);
                 }))
                 .map(v -> {
                     synchronized (AcmeManager.this) {
@@ -702,20 +702,22 @@ public class AcmeManager {
                 .recover(describeFailure("DB directory create"));
     }
 
-    private Future<AcmeConfig> readConf(final String file) {
+    public Future<AcmeConfig> readConf(final String file, final String type) {
         return future((Future<Buffer> fut) -> vertx.fileSystem().readFile(file, fut))
-                .recover(describeFailure("Error loading previous config " + file))
+                .recover(describeFailure("Error loading " + type + " config " + file))
                 .compose(buf -> executeBlocking(fut -> {
                     try {
                         ObjectMapper objectMapper = new ObjectMapper();
-                        fut.complete(objectMapper.readValue(buf.getBytes(), AcmeConfig.class));
+                        AcmeConfig result = objectMapper.readValue(buf.getBytes(), AcmeConfig.class);
+                        logger.info(ucFirst(type) + " config read from " + file);
+                        fut.complete(result);
                     } catch (IOException e) {
-                        fut.fail(new RuntimeException("Previous config file " + file + " broken", e));
+                        fut.fail(new RuntimeException(ucFirst(type) + " config file " + file + " broken", e));
                     }
                 }));
     }
 
-    private Future<Void> writeConf(final String file, final AcmeConfig newConf) {
+    public Future<Void> writeConf(final String file, final String type, final AcmeConfig newConf) {
         return executeBlocking(((Future<Buffer> fut) -> {
             try {
                 fut.complete(buffer(new ObjectMapper().writeValueAsBytes(newConf)));
@@ -723,7 +725,15 @@ public class AcmeManager {
                 fut.fail(e);
             }
         })).compose(buf -> future((Future<Void> fut) -> vertx.fileSystem().writeFile(file, buf, fut))
-                .recover(describeFailure("Active config file write")));
+                .recover(describeFailure(ucFirst(type) + " config file write"))
+                .map(v -> {
+                    logger.info(ucFirst(type) + " config written to " + file);
+                    return v;
+                }));
+    }
+
+    private String ucFirst(String s) {
+        return s.substring(0, 1).toUpperCase() + s.substring(1);
     }
 
     private static <K, V> List<MapDiff<K,V>> mapDiff(final Map<K, V> old, final Map<K, V> nev) {

@@ -1,0 +1,14 @@
+{
+    "accounts": {
+        "testaccount": {
+            "acceptedAgreementUrl": "https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf",
+            "certificates": {},
+            "contactURIs": [
+                "mailto:foo@example.com"
+            ],
+            "enabled": true,
+            "minimumValidityDays": 5,
+            "providerUrl": "acme://letsencrypt.org/staging"
+        }
+    }
+}
