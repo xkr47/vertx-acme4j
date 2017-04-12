@@ -17,14 +17,18 @@ package io.nitor.vertx.acme4j.util;
 
 import io.vertx.core.Vertx;
 import io.vertx.core.net.KeyCertOptions;
+import org.apache.logging.log4j.Logger;
 
 import javax.net.ssl.*;
 import java.net.Socket;
 import java.security.*;
 import java.security.cert.X509Certificate;
 
+import static org.apache.logging.log4j.LogManager.*;
+
 public class DynamicCertOptions implements KeyCertOptions {
 
+    private static final Logger logger = getLogger(DynamicCertOptions.class);
     private final MyKeyManager keyManager = new MyKeyManager();
     private final MyKeyManagerFactory factory = new MyKeyManagerFactory(keyManager);
 
@@ -90,6 +94,8 @@ public class DynamicCertOptions implements KeyCertOptions {
                     break;
                 }
             }
+
+            logger.trace("Hostname = " + hostname);
 
             // If we got given a hostname over SNI, check if we have a cert and key for that hostname. If so, we use it.
             // Otherwise, we fall back to the default certificate.
