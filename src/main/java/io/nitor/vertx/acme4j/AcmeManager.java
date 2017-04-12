@@ -129,6 +129,17 @@ public class AcmeManager {
                     .orElse(f -> f)
                     .apply(succeededFuture())
                     .map(v -> {
+                        long numDefaultCerts = newC.accounts.entrySet()
+                                .stream()
+                                .filter(a -> a.getValue().enabled)
+                                .flatMap(a -> a.getValue().certificates.entrySet()
+                                        .stream()
+                                        .filter(e -> e.getValue().enabled && e.getValue().defaultCert)
+                                        .map(e -> new SimpleEntry<>(a.getKey(), e.getKey())))
+                                .count();
+                        if (numDefaultCerts == 0) {
+                            dynamicCertManager.setIdOfDefaultAlias(null);
+                        }
                         logger.info("Done updating " + newC.accounts.size() + " accounts");
                         return v;
                     });
@@ -412,6 +423,9 @@ public class AcmeManager {
                         // TODO consider filtering subset of hostnames to be served
                         logger.info("Installing existing certificate & KeyPair");
                         dynamicCertManager.put(fullCertificateId, keyPair.getPrivate(), certChain);
+                        if (newC.defaultCert) {
+                            dynamicCertManager.setIdOfDefaultAlias(fullCertificateId);
+                        }
                         return Future.<Void>succeededFuture();
                     }).setHandler(fut);
                 });
@@ -534,6 +548,9 @@ public class AcmeManager {
                                                     .recover(describeFailure("Certificate file write")).compose(vv -> {
                                                 logger.info("Installing certificate");
                                                 dynamicCertManager.put(fullCertificateId, domainKeyPair.getPrivate(), cert, chain);
+                                                if (newC.defaultCert) {
+                                                    dynamicCertManager.setIdOfDefaultAlias(fullCertificateId);
+                                                }
                                                 return Future.<Void>succeededFuture();
                                             });
                                     });

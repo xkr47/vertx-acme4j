@@ -75,7 +75,7 @@ public class TestApp extends AbstractVerticle
                 .requestHandler(this::handle)
                 .listen(listenPort);
 
-        DynamicCertManager certManager = new DynamicCertManager(vertx, dynamicCertOptions, "default");
+        DynamicCertManager certManager = new DynamicCertManager(vertx, dynamicCertOptions);
 
         AcmeManager acmeMgr = new AcmeManager(vertx, certManager, ".acmemanager");
         acmeMgr.readConf("acme.json", "conf")

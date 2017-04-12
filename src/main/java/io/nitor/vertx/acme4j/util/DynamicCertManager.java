@@ -48,13 +48,12 @@ public class DynamicCertManager {
 
     private final Vertx vertx;
     private final DynamicCertOptions opts;
-    private final String idOfDefaultAlias;
     private final Map<String, CertCombo> map = new HashMap<>();
+    private String idOfDefaultAlias;
 
-    public DynamicCertManager(Vertx vertx, DynamicCertOptions opts, String idOfDefaultAlias) {
+    public DynamicCertManager(Vertx vertx, DynamicCertOptions opts) {
         this.vertx = vertx;
         this.opts = opts;
-        this.idOfDefaultAlias = idOfDefaultAlias;
     }
 
     public void put(String id, PrivateKey key, Certificate cert, Certificate... chain) {
@@ -74,6 +73,17 @@ public class DynamicCertManager {
 
     public CertCombo get(String certificateId) {
         return map.get(certificateId);
+    }
+
+    /**
+     * @param idOfDefaultAlias null (or non-matching id) gives no default cert
+     */
+    public void setIdOfDefaultAlias(String idOfDefaultAlias) {
+        this.idOfDefaultAlias = idOfDefaultAlias;
+    }
+
+    public String getIdOfDefaultAlias() {
+        return idOfDefaultAlias;
     }
 
     public synchronized void put(CertCombo cc) {

@@ -19,6 +19,7 @@ import io.nitor.vertx.acme4j.util.Struct;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.stream.Collectors;
 
 public class AcmeConfig extends Struct {
@@ -42,6 +43,17 @@ public class AcmeConfig extends Struct {
                 .collect(Collectors.toList());
         if (!duplicateHostNames.isEmpty()) {
             throw new IllegalArgumentException("Duplicate hostnames found among accounts and certificates: " + duplicateHostNames);
+        }
+        List<String> certsMarkedDefault = accounts.entrySet()
+                .stream()
+                .filter(a -> a.getValue().enabled)
+                .flatMap(a -> a.getValue().certificates.entrySet()
+                        .stream()
+                        .filter(e -> e.getValue().enabled && e.getValue().defaultCert)
+                        .map(e -> "account " + a.getKey() + " certificate " + e.getKey()))
+                .collect(Collectors.toList());
+        if (certsMarkedDefault.size() > 1) {
+            throw new IllegalArgumentException("Multiple certificates marked default: " + certsMarkedDefault);
         }
     }
 
@@ -71,6 +83,7 @@ public class AcmeConfig extends Struct {
 
     public static class Certificate extends Struct {
         public boolean enabled = true;
+        public boolean defaultCert;
         public String organization;
         public List<String> hostnames;
 
