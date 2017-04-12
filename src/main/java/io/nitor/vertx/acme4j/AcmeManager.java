@@ -486,7 +486,7 @@ public class AcmeManager {
                     .compose(v -> {
                         logger.info("All domains successfully authorized by account");
                         return createCertificate(registration, accountDbId, certificateId, keyPairFile, certificateFile, newC.hostnames, newC.organization).map(w -> {
-                            logger.info("Certificate successfully activated. All done.");
+                            logger.info("Certificate successfully activated");
                             return w;
                         });
                     });
