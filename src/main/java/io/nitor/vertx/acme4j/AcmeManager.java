@@ -423,10 +423,7 @@ public class AcmeManager {
                             AsyncKeyPairUtils.readKeyPair(vertx, keyPairFut.result()).compose(keyPair -> {
                                 // TODO consider filtering subset of hostnames to be served
                                 logger.info("Installing existing certificate & KeyPair");
-                                dynamicCertManager.put(fullCertificateId, keyPair.getPrivate(), certChain);
-                                if (newC.defaultCert) {
-                                    dynamicCertManager.setIdOfDefaultAlias(fullCertificateId);
-                                }
+                                dynamicCertManager.put(fullCertificateId, newC.defaultCert, keyPair.getPrivate(), certChain);
                                 return Future.<Void>succeededFuture();
                             }).setHandler(fut);
                         }));
@@ -548,10 +545,7 @@ public class AcmeManager {
                                             return future((Future<Void> fut4) -> vertx.fileSystem().writeFile(certificateFile, certBuffer, fut4))
                                                     .recover(describeFailure("Certificate file write")).compose(vv -> {
                                                 logger.info("Installing certificate");
-                                                dynamicCertManager.put(fullCertificateId, domainKeyPair.getPrivate(), cert, chain);
-                                                if (newC.defaultCert) {
-                                                    dynamicCertManager.setIdOfDefaultAlias(fullCertificateId);
-                                                }
+                                                dynamicCertManager.put(fullCertificateId, newC.defaultCert, domainKeyPair.getPrivate(), cert, chain);
                                                 return Future.<Void>succeededFuture();
                                             });
                                     });
@@ -594,7 +588,7 @@ public class AcmeManager {
                     }
                     final String id = "letsencrypt-challenge-" + domainName;
                     logger.info("Installing challenge certificate");
-                    dynamicCertManager.put(id, sniKeyPair.getPrivate(), cert);
+                    dynamicCertManager.put(id, false, sniKeyPair.getPrivate(), cert);
                     logger.info("Challenge {} prepared, executing..", challenge.getType());
                     challenge.trigger();
                     fut.complete(id);

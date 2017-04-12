@@ -56,8 +56,8 @@ public class DynamicCertManager {
         this.opts = opts;
     }
 
-    public void put(String id, PrivateKey key, Certificate cert, Certificate... chain) {
-        put(id, key, merge(cert, chain));
+    public void put(String id, boolean defaultCert, PrivateKey key, Certificate cert, Certificate... chain) {
+        put(id, defaultCert, key, merge(cert, chain));
     }
 
     public static Certificate[] merge(Certificate cert, Certificate[] chain) {
@@ -67,8 +67,8 @@ public class DynamicCertManager {
         return result;
     }
 
-    public void put(String id, PrivateKey key, Certificate[] certWithChain) {
-        put(new CertCombo(id, key, certWithChain));
+    public void put(String id, boolean defaultCert, PrivateKey key, Certificate[] certWithChain) {
+        put(new CertCombo(id, key, certWithChain), defaultCert);
     }
 
     public CertCombo get(String certificateId) {
@@ -80,15 +80,21 @@ public class DynamicCertManager {
      */
     public void setIdOfDefaultAlias(String idOfDefaultAlias) {
         this.idOfDefaultAlias = idOfDefaultAlias;
+        logger.info("Setting default cert to " + idOfDefaultAlias);
+        update();
     }
 
     public String getIdOfDefaultAlias() {
         return idOfDefaultAlias;
     }
 
-    public synchronized void put(CertCombo cc) {
+    public synchronized void put(CertCombo cc, boolean defaultCert) {
         CertCombo old = map.put(cc.id, cc);
         logger.info((old != null ? "Replacing" : "Installing") + " cert for " + cc.id);
+        if (defaultCert) {
+            logger.info("Setting default cert to " + cc.id);
+            this.idOfDefaultAlias = cc.id;
+        }
         update();
     }
 
@@ -102,7 +108,7 @@ public class DynamicCertManager {
         try {
             KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
             keyStore.load(null, null);
-            String defaultAlias = "dummy";
+            String defaultAlias = null;
             for (CertCombo cc : map.values()) {
                 String defaultAliasCandidate = KeyStoreUtil.importKeyAndCertsToStore(keyStore, cc.key, cc.certWithChain);
                 if (cc.id.equals(idOfDefaultAlias)) {
