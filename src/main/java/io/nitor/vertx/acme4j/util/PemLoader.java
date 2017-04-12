@@ -64,7 +64,7 @@ public class PemLoader {
 
     public static PrivateKey loadPrivateKey(Buffer keyValue) {
         if (keyValue == null) {
-            throw new RuntimeException("Missing private key path");
+            throw new NullPointerException("Missing private key");
         }
         try {
             byte[] value = loadPem(keyValue, "PRIVATE KEY").get(0);
@@ -77,7 +77,7 @@ public class PemLoader {
 
     public static X509Certificate[] loadCerts(Buffer buffer) {
         if (buffer == null) {
-            throw new RuntimeException("Missing X.509 certificate path");
+            throw new NullPointerException("Missing X.509 certificate");
         }
         try {
             List<byte[]> pems = loadPem(buffer, "CERTIFICATE");
