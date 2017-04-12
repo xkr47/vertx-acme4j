@@ -645,25 +645,9 @@ public class AcmeManager {
      * @return A future that can be monitored for completion of startup.
      */
     public Future<Void> start() {
-        return initDb().compose(v -> {
-            if (state != State.NOT_STARTED) {
-                throw new IllegalStateException("Already started");
-            }
-            synchronized (AcmeManager.this) {
-                state = State.UPDATING;
-            }
-            String file = activeConfigPath();
-            return doUpdate(future((Future<Boolean> fut) -> vertx.fileSystem().exists(file, fut))
-                    .recover(describeFailure("Error checking previous config " + file))
-                    .compose(exists ->
-                            exists ? readConf(file, "active") : future((Future<AcmeConfig> fut) -> {
-                                AcmeConfig emptyConf = new AcmeConfig();
-                                emptyConf.accounts = emptyMap();
-                                fut.complete(emptyConf);
-                            })));
-        });
+        changeState(State.NOT_STARTED, State.UPDATING);
+        return initDb().compose(v -> getActiveConfigFuture().compose(savedConf -> doUpdate(savedConf, savedConf)));
     }
-
 
     /**
      * Start up with given config.
@@ -671,7 +655,8 @@ public class AcmeManager {
      * @return A future that can be monitored for completion of startup.
      */
     public Future<Void> start(AcmeConfig conf) {
-        return initDb().compose(v -> configure(State.NOT_STARTED, conf));
+        changeState(State.NOT_STARTED, State.UPDATING);
+        return initDb().compose(v -> getActiveConfigFuture().compose(savedConf -> doUpdate(savedConf, conf.clone())));
     }
 
     /**
@@ -680,34 +665,49 @@ public class AcmeManager {
      * @return A future that can be monitored for completion of reconfiguration.
      */
     public Future<Void> reconfigure(AcmeConfig conf) {
-        return configure(State.OK, conf);
+        changeState(State.OK, State.UPDATING);
+        return doUpdate(cur, conf.clone());
     }
 
-    private Future<Void> configure(State expectedState, AcmeConfig conf) {
+    // TODO if something goes wrong on account level, continue with other accounts before failing
+    // TODO likewise for certificate level
+
+    private Future<AcmeConfig> getActiveConfigFuture() {
+        String file = activeConfigPath();
+        return future((Future<Boolean> fut) -> vertx.fileSystem().exists(file, fut))
+                .recover(describeFailure("Error checking previous config " + file))
+                .compose(exists ->
+                        exists ? readConf(file, "active") : future((Future<AcmeConfig> fut) -> fut.complete(emptyConf())));
+    }
+
+    public AcmeConfig emptyConf() {
+        AcmeConfig emptyConf = new AcmeConfig();
+        emptyConf.accounts = emptyMap();
+        return emptyConf;
+    }
+
+    private void changeState(State expectedState, State newState) {
         synchronized (AcmeManager.this) {
             if (state != expectedState) {
                 throw new IllegalStateException("Wrong state " + state);
             }
-            state = State.UPDATING;
+            state = newState;
         }
-        final AcmeConfig conf2 = conf.clone();
-        // TODO if something goes wrong on account level, continue with other accounts before failing
-        // TODO likewise for certificate level
-        return doUpdate(succeededFuture(conf2));
     }
 
-    Future<Void> doUpdate(Future<AcmeConfig> confFut) {
-        return confFut.compose(conf ->
-                configManager.update(cur, conf).compose(v -> {
-                    cur = conf;
-                    return writeConf(activeConfigPath(), "active", conf);
-                }))
+    private Future<Void> doUpdate(AcmeConfig oldConf, AcmeConfig newConf) {
+        return configManager.update(oldConf, newConf)
+                .compose(v -> {
+                    cur = newConf;
+                    return writeConf(activeConfigPath(), "active", newConf);
+                })
                 .map(v -> {
                     synchronized (AcmeManager.this) {
                         state = State.OK;
                     }
                     return v;
-                }).recover(t -> {
+                })
+                .recover(t -> {
                     synchronized (AcmeManager.this) {
                         state = State.FAILED;
                     }
