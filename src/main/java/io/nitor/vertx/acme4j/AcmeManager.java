@@ -489,19 +489,12 @@ public class AcmeManager {
                     });
         }
 
-        public void writePrivateKey(PrivateKey key, Writer w) throws IOException {
-            try (JcaPEMWriter jw = new JcaPEMWriter(w)) {
-                jw.writeObject(key);
-            }
-        }
-
         private Future<KeyPair> getOrCreateCertificateKeyPair(String keyPairFile) {
             //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
             return getOrCreateKeyPair("certificate", keyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
         }
 
         private Future<Void> createCertificate(Registration registration, String accountDbId, String certificateId, String keyPairFile, String certificateFile, List<String> domainNames, String organization) {
-            logger.info("Creating keyPair");
             return getOrCreateCertificateKeyPair(keyPairFile).compose(domainKeyPair -> executeBlocking((Future<Void> fut) -> {
                 final CSRBuilder csrb;
                 try {
