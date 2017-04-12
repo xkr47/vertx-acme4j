@@ -412,6 +412,7 @@ public class AcmeManager {
                         // TODO consider filtering subset of hostnames to be served
                         logger.info("Installing existing certificate & KeyPair");
                         dynamicCertManager.put(fullCertificateId, keyPair.getPrivate(), certChain);
+                        return Future.<Void>succeededFuture();
                     }).setHandler(fut);
                 });
             });
