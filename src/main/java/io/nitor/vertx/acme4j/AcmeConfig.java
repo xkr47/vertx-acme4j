@@ -91,15 +91,22 @@ public class AcmeConfig extends Struct {
         public boolean equals(Object o) {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
+
             Certificate that = (Certificate) o;
-            return enabled == that.enabled && organization.equals(that.organization) && hostnames.equals(that.hostnames);
+
+            if (enabled != that.enabled) return false;
+            if (defaultCert != that.defaultCert) return false;
+            if (organization != null ? !organization.equals(that.organization) : that.organization != null)
+                return false;
+            return hostnames != null ? hostnames.equals(that.hostnames) : that.hostnames == null;
         }
 
         @Override
         public int hashCode() {
             int result = (enabled ? 1 : 0);
+            result = 31 * result + (defaultCert ? 1 : 0);
             result = 31 * result + (organization != null ? organization.hashCode() : 0);
-            result = 31 * result + hostnames.hashCode();
+            result = 31 * result + (hostnames != null ? hostnames.hashCode() : 0);
             return result;
         }
 
