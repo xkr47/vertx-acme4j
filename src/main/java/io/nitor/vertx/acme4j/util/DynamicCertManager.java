@@ -71,20 +71,22 @@ public class DynamicCertManager {
         put(new CertCombo(id, key, certWithChain), defaultCert);
     }
 
-    public CertCombo get(String certificateId) {
+    public synchronized CertCombo get(String certificateId) {
         return map.get(certificateId);
     }
 
     /**
      * @param idOfDefaultAlias null (or non-matching id) gives no default cert
      */
-    public void setIdOfDefaultAlias(String idOfDefaultAlias) {
-        this.idOfDefaultAlias = idOfDefaultAlias;
+    public synchronized void setIdOfDefaultAlias(String idOfDefaultAlias) {
         logger.info("Setting default cert to " + idOfDefaultAlias);
-        update();
+        if (this.idOfDefaultAlias != idOfDefaultAlias) {
+            this.idOfDefaultAlias = idOfDefaultAlias;
+            update();
+        }
     }
 
-    public String getIdOfDefaultAlias() {
+    public synchronized String getIdOfDefaultAlias() {
         return idOfDefaultAlias;
     }
 
