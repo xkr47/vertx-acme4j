@@ -533,7 +533,7 @@ public class AcmeManager {
                                             return future((Future<Void> fut4) -> vertx.fileSystem().writeFile(certificateFile, certBuffer, fut4))
                                                     .recover(describeFailure("Certificate file write")).compose(vv -> {
                                                 logger.info("Installing certificate");
-                                                dynamicCertManager.put("letsencrypt-cert-" + certificateId, domainKeyPair.getPrivate(), cert, chain);
+                                                dynamicCertManager.put(fullCertificateId, domainKeyPair.getPrivate(), cert, chain);
                                                 return Future.<Void>succeededFuture();
                                             });
                                     });
