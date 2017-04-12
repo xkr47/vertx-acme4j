@@ -415,20 +415,21 @@ public class AcmeManager {
                         .recover(describeFailure("Certificate file read"));
                 Future<Buffer> keyPairFut = future((Future<Buffer> fut) -> vertx.fileSystem().readFile(keyPairFile, fut))
                         .recover(describeFailure("KeyPair file read"));
-                return executeBlocking((Future<Void> fut) -> {
-                    logger.info("Parsing existing certificate & KeyPair");
-                    X509Certificate[] certChain = PemLoader.loadCerts(certificateFut.result());
+                return join(asList(certificateFut, keyPairFut).stream()).compose(v ->
+                        executeBlocking((Future<Void> fut) -> {
+                            logger.info("Parsing existing certificate & KeyPair");
+                            X509Certificate[] certChain = PemLoader.loadCerts(certificateFut.result());
 
-                    AsyncKeyPairUtils.readKeyPair(vertx, keyPairFut.result()).compose(keyPair -> {
-                        // TODO consider filtering subset of hostnames to be served
-                        logger.info("Installing existing certificate & KeyPair");
-                        dynamicCertManager.put(fullCertificateId, keyPair.getPrivate(), certChain);
-                        if (newC.defaultCert) {
-                            dynamicCertManager.setIdOfDefaultAlias(fullCertificateId);
-                        }
-                        return Future.<Void>succeededFuture();
-                    }).setHandler(fut);
-                });
+                            AsyncKeyPairUtils.readKeyPair(vertx, keyPairFut.result()).compose(keyPair -> {
+                                // TODO consider filtering subset of hostnames to be served
+                                logger.info("Installing existing certificate & KeyPair");
+                                dynamicCertManager.put(fullCertificateId, keyPair.getPrivate(), certChain);
+                                if (newC.defaultCert) {
+                                    dynamicCertManager.setIdOfDefaultAlias(fullCertificateId);
+                                }
+                                return Future.<Void>succeededFuture();
+                            }).setHandler(fut);
+                        }));
             });
         }
 
