@@ -20,6 +20,7 @@ Provides a management layer so that you just have to configure the domains you w
 
 ```json
 {
+    "renewalCheckTime": "04:27:11",
     "accounts": {
         "testaccount": {
             "enabled": true,

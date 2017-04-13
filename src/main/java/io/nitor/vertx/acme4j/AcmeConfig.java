@@ -17,16 +17,19 @@ package io.nitor.vertx.acme4j;
 
 import io.nitor.vertx.acme4j.util.Struct;
 
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.stream.Collectors;
 
 public class AcmeConfig extends Struct {
+    public LocalTime renewalCheckTime;
     public Map<String,Account> accounts;
 
     public void validate() {
-        if (accounts == null) throw new NullPointerException();
+        if (renewalCheckTime == null) throw new NullPointerException("renewalCheckTime");
+        if (accounts == null) throw new NullPointerException("accounts");
         accounts.values().stream().forEach(Account::validate);
         List<String> duplicateHostNames = accounts.values()
                 .stream()

@@ -18,6 +18,7 @@ package io.nitor.vertx.acme4j;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.nitor.vertx.acme4j.AcmeConfig.Account;
 import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
 import io.nitor.vertx.acme4j.util.ContextLogger;
@@ -51,6 +52,8 @@ import java.security.KeyPair;
 import java.security.cert.CertificateExpiredException;
 import java.security.cert.CertificateNotYetValidException;
 import java.security.cert.X509Certificate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.Map.Entry;
@@ -64,6 +67,7 @@ import static io.vertx.core.Future.*;
 import static io.vertx.core.buffer.Buffer.buffer;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.System.currentTimeMillis;
+import static java.time.temporal.ChronoUnit.MILLIS;
 import static java.util.Arrays.asList;
 import static java.util.Collections.emptyMap;
 import static java.util.concurrent.TimeUnit.DAYS;
@@ -87,6 +91,7 @@ public class AcmeManager {
     final DynamicCertManager dynamicCertManager;
     final String dbPath;
     private final AcmeConfigManager configManager = new AcmeConfigManager();
+    private final ObjectMapper objectMapper;
     private AcmeConfig cur;
 
     enum State { NOT_STARTED, UPDATING, OK, FAILED }
@@ -96,12 +101,21 @@ public class AcmeManager {
         this.vertx = vertx;
         this.dynamicCertManager = dynamicCertManager;
         this.dbPath = dbPath.endsWith("/") ? dbPath : dbPath + '/';
+        objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JavaTimeModule());
     }
 
     class AcmeConfigManager {
         final Logger logger = getLogger(AcmeConfigManager.class);
+        private Long activeTimerId;
+        private LocalTime renewalCheckTime;
+
         public Future<Void> update(final AcmeConfig oldC, final AcmeConfig newC) {
             newC.validate();
+            if (activeTimerId == null || renewalCheckTime != newC.renewalCheckTime) {
+                renewalCheckTime = newC.renewalCheckTime;
+                schedule();
+            }
             return mapDiff(oldC == null ? new HashMap<>() : oldC.accounts, newC.accounts)
                     .stream()
                     .map((account) -> (Function<Future<Void>, Future<Void>>) prev -> {
@@ -143,6 +157,38 @@ public class AcmeManager {
                         logger.info("Done updating " + newC.accounts.size() + " accounts");
                         return v;
                     });
+        }
+
+        private void schedule() {
+            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime next = renewalCheckTime.atDate(now.toLocalDate());
+            if (next.isBefore(now)) {
+                next = next.plusDays(1);
+            }
+            if (activeTimerId != null) {
+                vertx.cancelTimer(activeTimerId);
+                activeTimerId = null;
+            }
+            activeTimerId = vertx.setTimer(now.until(next, MILLIS), timerId -> {
+                logger.info("Renewal check starting");
+                activeTimerId = null;
+                Future<Void> checked;
+                try {
+                    checked = check();
+                } catch (IllegalStateException e) {
+                    // someone else already updating, skip
+                    checked = failedFuture(e);
+                }
+                checked.setHandler(ar -> {
+                    if (ar.succeeded()) {
+                        logger.info("Renewal check completed successfully");
+                    } else {
+                        logger.warn("Renewal check failed", ar.cause());
+                    }
+                    schedule();
+                });
+            });
+            logger.info("Scheduled next renewal check at " + next);
         }
     }
 
@@ -678,6 +724,11 @@ public class AcmeManager {
         return doUpdate(cur, conf.clone());
     }
 
+    public Future<Void> check() {
+        changeState(State.OK, State.UPDATING);
+        return doUpdate(cur, cur);
+    }
+
     // TODO if something goes wrong on account level, continue with other accounts before failing
     // TODO likewise for certificate level
 
@@ -707,7 +758,7 @@ public class AcmeManager {
     private Future<Void> doUpdate(AcmeConfig oldConf, AcmeConfig newConf) {
         return executeBlocking((Future<Void> fut) -> {
             try {
-                ObjectWriter objectWriter = new ObjectMapper().writerWithDefaultPrettyPrinter();
+                ObjectWriter objectWriter = objectMapper.writerWithDefaultPrettyPrinter();
                 if (oldConf == newConf) {
                     logger.info("Using config: " + objectWriter.writeValueAsString(newConf));
                 } else {
@@ -747,7 +798,6 @@ public class AcmeManager {
                 .recover(describeFailure("Error loading " + type + " config " + file))
                 .compose(buf -> executeBlocking(fut -> {
                     try {
-                        ObjectMapper objectMapper = new ObjectMapper();
                         AcmeConfig result = objectMapper.readValue(buf.getBytes(), AcmeConfig.class);
                         logger.info(ucFirst(type) + " config read from " + file);
                         fut.complete(result);
@@ -760,7 +810,7 @@ public class AcmeManager {
     public Future<Void> writeConf(final String file, final String type, final AcmeConfig newConf) {
         return executeBlocking(((Future<Buffer> fut) -> {
             try {
-                fut.complete(buffer(new ObjectMapper().writeValueAsBytes(newConf)));
+                fut.complete(buffer(objectMapper.writeValueAsBytes(newConf)));
             } catch (JsonProcessingException e) {
                 fut.fail(e);
             }
