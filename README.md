@@ -6,15 +6,15 @@ Provides a management layer so that you just have to configure the domains you w
 # Pros (?)
 * Supports only tls-sni-01 and tls-sni-02 challenges, which means all challenges happen through the same port 443 as the server itself
 * Supports multiple ACME (Let's Encrypt or other) accounts, multiple certificates per account and/or multiple hostnames per certificate
-* Enables TLS SNI support in vert.x through custom, dynamically reconfigurable keystore (no listen socket downtime) - you can thus use it for hosting/reverse-proxying multiple TLS-enabled sites behind a single IP with different hostnames and/or certificates
+* Enables TLS SNI support in vert.x through custom, dynamically reconfigurable keystore (no listen socket downtime)
+  * you can thus use it for hosting/reverse-proxying multiple services behind a single IP and port while still serving different certificates, selected using SNI hostname.
   * you can implement a server that does not have a default certificate at all -> TLS handshake fails if hostname is not listed in any of the installed certificates -> pure IP scanning reveals nothing (assuming reverse lookup of the server IP does not reveal a supported domain)
 * Configurable through POJOs or JSON files.
 
 # Cons
-* Requires TLS SNI from clients if you want TLS virtualhosting with **multiple certificates or without a default certificate**, but seems pretty well supported by clients these days
+* Requires TLS SNI from clients if you a) don't want to have a default certificate or b) clients need to access hostnames of other certificates than the **default certificate**. So if you can put all hostnames that need to be accessible by TLS-SNI-handicapped clients in the default certificate, TLS SNI is NOT required of the clients. Luckily TLS SNI seems pretty well supported by clients these days:
   * browsers & cURL support it
   * most trouble would probably be related to accessing e.g. REST endpoints over HTTPS from applications e.g. whether they support TLS SNI
-  * OTOH if you only need a single certificate (which still can support multiple hostnames) AND you make it the default certificate, then TLS SNI is NOT required.
 
 # Sample config file
 
