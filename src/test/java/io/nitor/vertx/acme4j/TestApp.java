@@ -23,13 +23,13 @@ import io.vertx.core.Launcher;
 import io.vertx.core.http.HttpServerOptions;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import io.vertx.core.logging.Logger;
 
 import java.nio.file.Paths;
 import java.util.stream.Stream;
 
 import static com.nitorcreations.core.utils.KillProcess.killProcessUsingPort;
+import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.Integer.getInteger;
 import static java.lang.System.*;
 import static java.nio.file.Files.exists;
@@ -58,7 +58,7 @@ public class TestApp extends AbstractVerticle
             setProperty("log4j.configurationFile", "src/test/resources/log4j2.xml");
         }
         setProperty("vertx.logger-delegate-factory-class-name", "io.vertx.core.logging.Log4j2LogDelegateFactory");
-        logger = LogManager.getLogger(TestApp.class);
+        logger = getLogger(TestApp.class);
     }
 
     @Override

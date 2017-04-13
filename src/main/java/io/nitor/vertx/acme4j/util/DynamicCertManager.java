@@ -16,8 +16,7 @@
 package io.nitor.vertx.acme4j.util;
 
 import io.vertx.core.Vertx;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import io.vertx.core.logging.Logger;
 
 import java.io.IOException;
 import java.security.KeyStore;
@@ -29,10 +28,11 @@ import java.security.cert.CertificateException;
 import java.util.HashMap;
 import java.util.Map;
 
+import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.util.stream.Collectors.toList;
 
 public class DynamicCertManager {
-    static final Logger logger = LogManager.getLogger(DynamicCertManager.class);
+    static final Logger logger = getLogger(DynamicCertManager.class);
 
     public static class CertCombo {
         public final String id; // for removing/updating later

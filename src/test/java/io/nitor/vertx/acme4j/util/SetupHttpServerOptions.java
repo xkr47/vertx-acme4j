@@ -17,13 +17,13 @@ package io.nitor.vertx.acme4j.util;
 
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServerOptions;
+import io.vertx.core.logging.Logger;
 import io.vertx.core.net.JdkSSLEngineOptions;
 import io.vertx.core.net.OpenSSLEngineOptions;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.util.List;
 
+import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.util.Arrays.asList;
 
 public class SetupHttpServerOptions {
@@ -36,7 +36,7 @@ public class SetupHttpServerOptions {
     );
     private static final boolean USE_OPENSSL = false;
 
-    static final Logger logger = LogManager.getLogger(SetupHttpServerOptions.class);
+    static final Logger logger = getLogger(SetupHttpServerOptions.class);
 
     public static HttpServerOptions createHttpServerOptions(Vertx vertx, DynamicCertOptions dynamicCertOptions) {
         HttpServerOptions httpOptions = new HttpServerOptions()

@@ -27,9 +27,8 @@ import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
+import io.vertx.core.logging.Logger;
 import org.shredzone.acme4j.*;
 import org.shredzone.acme4j.challenge.Challenge;
 import org.shredzone.acme4j.challenge.TlsSni01Challenge;
@@ -64,6 +63,7 @@ import java.util.stream.Stream;
 
 import static io.vertx.core.Future.*;
 import static io.vertx.core.buffer.Buffer.buffer;
+import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.lang.System.currentTimeMillis;
 import static java.util.Arrays.asList;
 import static java.util.Collections.emptyMap;
@@ -82,7 +82,7 @@ public class AcmeManager {
     //static final String ACME_SERVER_URI = "acme://letsencrypt.org/staging";
     // static final String AGREEMENT_URI = "https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf";
 
-    private static Logger logger = LogManager.getLogger(AcmeManager.class);
+    private static Logger logger = getLogger(AcmeManager.class);
 
     private final Vertx vertx;
     private final DynamicCertManager dynamicCertManager;

@@ -16,15 +16,15 @@
 package io.nitor.vertx.acme4j.util;
 
 import io.vertx.core.Vertx;
+import io.vertx.core.logging.Logger;
 import io.vertx.core.net.KeyCertOptions;
-import org.apache.logging.log4j.Logger;
 
 import javax.net.ssl.*;
 import java.net.Socket;
 import java.security.*;
 import java.security.cert.X509Certificate;
 
-import static org.apache.logging.log4j.LogManager.*;
+import static io.vertx.core.logging.LoggerFactory.getLogger;
 
 public class DynamicCertOptions implements KeyCertOptions {
 
