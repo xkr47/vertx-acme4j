@@ -28,7 +28,7 @@ Provides a management layer so that you just have to configure the domains you w
                 "mailto:foo@example.com"
             ],
             "minimumValidityDays": 5,
-            "providerUrl": "acme://letsencrypt.org/staging",
+            "providerUrl": "acme://letsencrypt.org/staging",          # remove "staging" for production CA
             "certificates": {
                 "testcert": {
                     "enabled": true,
