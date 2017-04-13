@@ -269,7 +269,7 @@ public class AcmeManager {
 
         private Future<KeyPair> getOrCreateAccountKeyPair(String accountDbId) {
             String accountKeyPairFile = dbPath + accountDbId + '-' + ACCOUNT_KEY_PAIR_FILE;
-            return getOrCreateKeyPair("account", accountKeyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
+            return getOrCreateKeyPair(logger, "account", accountKeyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
             //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
         }
 
@@ -470,7 +470,7 @@ public class AcmeManager {
 
         private Future<KeyPair> getOrCreateCertificateKeyPair(String keyPairFile) {
             //keyPairFut = AsyncKeyPairUtils.createECKeyPair(vertx, "secp256r1");
-            return getOrCreateKeyPair("certificate", keyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
+            return getOrCreateKeyPair(logger, "certificate", keyPairFile, () -> AsyncKeyPairUtils.createKeyPair(vertx, 4096));
         }
 
         private Future<Void> createCertificate(Registration registration, String accountDbId, String certificateId, String keyPairFile, String certificateFile, List<String> domainNames, String organization) {
@@ -495,13 +495,13 @@ public class AcmeManager {
                         vertx.fileSystem().writeFile(csrFile, buffer, fut2);
                     }).recover(describeFailure("Certificate Request file write")).compose(v -> {
                         logger.info("Requesting certificate meta..");
-                        return fetchWithRetry(() -> registration.requestCertificate(csrb.getEncoded()))
+                        return fetchWithRetry(logger, () -> registration.requestCertificate(csrb.getEncoded()))
                                 .recover(describeFailure("Certificate request")).compose(certificate -> {
                             logger.info("Requesting certificate..");
-                            return fetchWithRetry(() -> certificate.download())
+                            return fetchWithRetry(logger, () -> certificate.download())
                                     .recover(describeFailure("Certificate download")).compose(cert -> {
                                 logger.info("Requesting certificate chain..");
-                                return fetchWithRetry(() -> certificate.downloadChain())
+                                return fetchWithRetry(logger, () -> certificate.downloadChain())
                                         .recover(describeFailure("Certificate chain download")).compose(chain -> {
                                     logger.info("Serializing certificate chain");
                                     return executeBlocking((Future<Buffer> writeCert) -> {
@@ -581,7 +581,7 @@ public class AcmeManager {
                     fut.fail(e);
                 }
             }).compose(id -> {
-                return fetchWithRetry(new Callable<Boolean>() {
+                return fetchWithRetry(logger, new Callable<Boolean>() {
                     Status reportedStatus = null;
 
                     @Override
@@ -778,7 +778,7 @@ public class AcmeManager {
         return t -> failedFuture(new RuntimeException(msg, t));
     }
 
-    Future<KeyPair> getOrCreateKeyPair(String type, final String keyPairFile, final Supplier<Future<KeyPair>> creator) {
+    Future<KeyPair> getOrCreateKeyPair(Logger logger, String type, final String keyPairFile, final Supplier<Future<KeyPair>> creator) {
         return future((Future<Boolean> fut) -> vertx.fileSystem().exists(keyPairFile, fut))
                 .recover(describeFailure("Keypair for " + type + " file check")).compose(keyFileExists -> {
             if (keyFileExists) {
@@ -804,11 +804,11 @@ public class AcmeManager {
         });
     }
 
-    <T> Future<T> fetchWithRetry(Callable<T> blockingHandler) {
-        return future((Future<T> fut) -> fetchWithRetry(blockingHandler, fut));
+    <T> Future<T> fetchWithRetry(Logger logger, Callable<T> blockingHandler) {
+        return future((Future<T> fut) -> fetchWithRetry(logger, blockingHandler, fut));
     }
 
-    <T> void fetchWithRetry(Callable<T> blockingHandler, Future<T> done) {
+    <T> void fetchWithRetry(Logger logger, Callable<T> blockingHandler, Future<T> done) {
         vertx.executeBlocking((Future<T> fut) -> {
             try {
                 fut.complete(blockingHandler.call());
@@ -826,7 +826,7 @@ public class AcmeManager {
             }
             long nextSleep = ar.succeeded() ? 3000 : ((AcmeRetryAfterException) ar.cause()).getRetryAfter().getTime() - currentTimeMillis();
             logger.info("Recheck in {}ms @ {}", nextSleep, new Date(System.currentTimeMillis() + nextSleep));
-            vertx.setTimer(nextSleep, timerId -> fetchWithRetry(blockingHandler, done));
+            vertx.setTimer(nextSleep, timerId -> fetchWithRetry(logger, blockingHandler, done));
         });
     }
 
