@@ -17,6 +17,7 @@ package io.nitor.vertx.acme4j;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
 import io.nitor.vertx.acme4j.AcmeConfig.Account;
 import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
 import io.nitor.vertx.acme4j.util.ContextLogger;
@@ -704,7 +705,20 @@ public class AcmeManager {
     }
 
     private Future<Void> doUpdate(AcmeConfig oldConf, AcmeConfig newConf) {
-        return configManager.update(oldConf, newConf)
+        return executeBlocking((Future<Void> fut) -> {
+            try {
+                ObjectWriter objectWriter = new ObjectMapper().writerWithDefaultPrettyPrinter();
+                if (oldConf == newConf) {
+                    logger.info("Using config: " + objectWriter.writeValueAsString(newConf));
+                } else {
+                    logger.info("Updating config: " + objectWriter.writeValueAsString(oldConf) + " to " + objectWriter.writeValueAsString(newConf));
+                }
+                fut.complete();
+            } catch (JsonProcessingException e) {
+                fut.fail(e);
+            }
+        })
+                .compose(v -> configManager.update(oldConf, newConf))
                 .compose(v -> {
                     cur = newConf;
                     return writeConf(activeConfigPath(), "active", newConf);
