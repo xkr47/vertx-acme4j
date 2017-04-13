@@ -52,7 +52,7 @@ Thanks to how SNI works we can still serve our regular domains (assuming you are
 
 # Under construction
 
-This code is by no means ready. Don't expect it to work yet.
+This code is by no means ready. Don't expect it to work yet. Many scenarios already verified to work.
 
 # Goals and guidelines
 
@@ -64,3 +64,4 @@ This code is by no means ready. Don't expect it to work yet.
   * Even if the certificates would have expired; better have some service than no service
     * This could perhaps be configurable
 * Locally cache data necessary to achieve the above goals
+* Database (storing certs and metadata) implementation provided by interface so you can choose between single-machine or clustered implementations or write your own S3/whatnot sync.
