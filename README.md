@@ -32,6 +32,7 @@ Provides a management layer so that you just have to configure the domains you w
             "certificates": {
                 "testcert": {
                     "enabled": true,
+                    "defaultCert": true,
                     "organization": "My test organization",
                     "hostnames": [
                         "non.existing.blahblah"
