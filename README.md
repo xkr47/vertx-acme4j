@@ -16,6 +16,33 @@ Provides a management layer so that you just have to configure the domains you w
   * most trouble would probably be related to accessing e.g. REST endpoints over HTTPS from applications e.g. whether they support TLS SNI 
 * You can still OPTIONALLY have a default domain selected if SNI not provided (supported) by the client 
 
+# Sample config file
+
+```json
+{
+    "accounts": {
+        "testaccount": {
+            "enabled": true,
+            "acceptedAgreementUrl": "https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf",
+            "contactURIs": [
+                "mailto:foo@example.com"
+            ],
+            "minimumValidityDays": 5,
+            "providerUrl": "acme://letsencrypt.org/staging",
+            "certificates": {
+                "testcert": {
+                    "enabled": true,
+                    "organization": "My test organization",
+                    "hostnames": [
+                        "non.existing.blahblah"
+                    ]
+                }
+            }
+        }
+    }
+}
+```
+
 # tls-sni-01 and tls-sni-02
 
 These challenges work so that a temporary certificate is made for a specific dummy domain. Using TLS SNI, the ACME provider then makes a request to our server on port 443, with the SNI hostname set to the dummy domain. The challenge is then completed when our server responds with the temporary certificate.
