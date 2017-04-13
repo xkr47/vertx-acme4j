@@ -19,6 +19,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nitor.vertx.acme4j.AcmeConfig.Account;
 import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
+import io.nitor.vertx.acme4j.util.ContextLogger;
 import io.nitor.vertx.acme4j.util.DynamicCertManager;
 import io.nitor.vertx.acme4j.util.DynamicCertManager.CertCombo;
 import io.nitor.vertx.acme4j.util.MultiException;
@@ -100,6 +101,7 @@ public class AcmeManager {
     }
 
     class AcmeConfigManager {
+        final Logger logger = getLogger(AcmeConfigManager.class);
         public Future<Void> update(final AcmeConfig oldC, final AcmeConfig newC) {
             newC.validate();
             return mapDiff(oldC == null ? new HashMap<>() : oldC.accounts, newC.accounts)
@@ -152,6 +154,7 @@ public class AcmeManager {
         final Account newAOrig;
         final String oldAccountDbId;
         final String newAccountDbId;
+        final ContextLogger logger;
         Map<String, Authorization> authorizations;
         Registration registration;
 
@@ -161,6 +164,7 @@ public class AcmeManager {
             this.newAOrig = newA;
             oldAccountDbId = accountDbIdFor(accountId, oldA);
             newAccountDbId = accountDbIdFor(accountId, newA);
+            logger = new ContextLogger(AccountManager.class, accountId);
         }
 
         public Future<Void> updateCached() {
@@ -181,7 +185,7 @@ public class AcmeManager {
             Stream<Future<Void>> futures = mapDiff(oldCs, newCs)
                     .stream()
                     .map((certificate) -> {
-                        final CertificateManager cm = new CertificateManager(null, accountDbId, newA.minimumValidityDays, null, certificate.key, certificate.oldValue, certificate.newValue);
+                        final CertificateManager cm = new CertificateManager(null, accountId, accountDbId, newA.minimumValidityDays, null, certificate.key, certificate.oldValue, certificate.newValue);
                         return cm.updateCached().recover(describeFailure("For certificate " + certificate.key));
                     });
             return join(futures);
@@ -219,7 +223,7 @@ public class AcmeManager {
                     Stream<Future<Void>> futures = mapDiff(oldCs, newCs)
                             .stream()
                             .map((certificate) -> {
-                                final CertificateManager cm = new CertificateManager(registration, newAccountDbId, newAOrig.minimumValidityDays, this::getAuthorization, certificate.key, certificate.oldValue, certificate.newValue);
+                                final CertificateManager cm = new CertificateManager(registration, accountId, newAccountDbId, newAOrig.minimumValidityDays, this::getAuthorization, certificate.key, certificate.oldValue, certificate.newValue);
                                 return cm.updateOthers().recover(describeFailure("For certificate " + certificate.key));
                             });
                     return join(futures);
@@ -375,8 +379,9 @@ public class AcmeManager {
         final AcmeConfig.Certificate newC;
         final String keyPairFile;
         final String certificateFile;
+        final ContextLogger logger;
 
-        public CertificateManager(Registration registration, String accountDbId, int minimumValidityDays, Function<String, Future<Authorization>> getAuthorization, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) {
+        public CertificateManager(Registration registration, String accountId, String accountDbId, int minimumValidityDays, Function<String, Future<Authorization>> getAuthorization, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) {
             this.registration = registration;
             this.accountDbId = accountDbId;
             this.minimumValidityDays = minimumValidityDays;
@@ -387,6 +392,7 @@ public class AcmeManager {
             this.newC = newC;
             keyPairFile = dbPath + accountDbId + "-" + certificateId + "-" + CERTIFICATE_KEY_PAIR_FILE;
             certificateFile = dbPath + accountDbId + "-" + certificateId + "-" + CERTIFICATE_CHAIN_FILE;
+            logger = new ContextLogger(AccountManager.class, accountId, certificateId);
         }
 
         public Future<Void> updateCached() {
@@ -434,6 +440,7 @@ public class AcmeManager {
             if (newC == null) {
                 return succeededFuture();
             }
+            // oldC is null on startup so we are unable to compare.. need to make it non-null and force a check!
             if (oldC != null && oldC.equals(newC)) {
                 // certificate is configuration-wise up-to-date
                 CertCombo certCombo = dynamicCertManager.get(fullCertificateId);
