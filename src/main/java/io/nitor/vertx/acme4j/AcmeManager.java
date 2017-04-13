@@ -28,7 +28,6 @@ import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
-import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
 import io.vertx.core.logging.Logger;
 import org.shredzone.acme4j.*;
 import org.shredzone.acme4j.challenge.Challenge;
@@ -44,12 +43,10 @@ import org.shredzone.acme4j.util.KeyPairUtils;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
-import java.io.Writer;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.security.KeyPair;
-import java.security.PrivateKey;
 import java.security.cert.CertificateExpiredException;
 import java.security.cert.CertificateNotYetValidException;
 import java.security.cert.X509Certificate;
@@ -85,9 +82,9 @@ public class AcmeManager {
 
     private static Logger logger = getLogger(AcmeManager.class);
 
-    private final Vertx vertx;
-    private final DynamicCertManager dynamicCertManager;
-    private final String dbPath;
+    final Vertx vertx;
+    final DynamicCertManager dynamicCertManager;
+    final String dbPath;
     private final AcmeConfigManager configManager = new AcmeConfigManager();
     private AcmeConfig cur;
 
