@@ -7,14 +7,14 @@ Provides a management layer so that you just have to configure the domains you w
 * Supports only tls-sni-01 and tls-sni-02 challenges, which means all challenges happen through the same port 443 as the server itself
 * Supports multiple ACME (Let's Encrypt or other) accounts, multiple certificates per account and/or multiple hostnames per certificate
 * Enables TLS SNI support in vert.x through custom, dynamically reconfigurable keystore (no listen socket downtime) - you can thus use it for hosting/reverse-proxying multiple TLS-enabled sites behind a single IP with different hostnames and/or certificates
-  * you can implement a server that does not even serve a certificate at all unless the client requests a hostname of one of your certificates -> pure IP scanning reveals nothing (assuming reverse lookup of the server IP does not reveal a supported domain)
+  * you can implement a server that does not have a default certificate at all -> TLS handshake fails if hostname is not listed in any of the installed certificates -> pure IP scanning reveals nothing (assuming reverse lookup of the server IP does not reveal a supported domain)
 * Configurable through POJOs or JSON files.
 
 # Cons
-* Requires TLS SNI from clients, but seems pretty well supported these days
+* Requires TLS SNI from clients if you want TLS virtualhosting with **multiple certificates or without a default certificate**, but seems pretty well supported by clients these days
   * browsers & cURL support it
-  * most trouble would probably be related to accessing e.g. REST endpoints over HTTPS from applications e.g. whether they support TLS SNI 
-* You can still OPTIONALLY have a default domain selected if SNI not provided (supported) by the client 
+  * most trouble would probably be related to accessing e.g. REST endpoints over HTTPS from applications e.g. whether they support TLS SNI
+  * OTOH if you only need a single certificate (which still can support multiple hostnames) AND you make it the default certificate, then TLS SNI is NOT required.
 
 # Sample config file
 
