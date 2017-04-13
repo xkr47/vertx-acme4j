@@ -212,7 +212,7 @@ public class AcmeManager {
                 } catch (URISyntaxException e) {
                     return failedFuture(e);
                 }
-                logger.info(accountId + ": Session set up");
+                logger.info("Session set up");
                 return getOrCreateRegistration(newAccountDbId, newAOrig, session).compose(registration -> {
                     this.registration = registration;
                     Map<String, AcmeConfig.Certificate> oldCs = oldA == null ? new HashMap<>() : oldA.certificates;
@@ -367,6 +367,7 @@ public class AcmeManager {
 
     class CertificateManager {
         final Registration registration;
+        final String accountId;
         final String accountDbId;
         final int minimumValidityDays;
         final Function<String, Future<Authorization>> getAuthorization;
@@ -380,6 +381,7 @@ public class AcmeManager {
 
         public CertificateManager(Registration registration, String accountId, String accountDbId, int minimumValidityDays, Function<String, Future<Authorization>> getAuthorization, String certificateId, AcmeConfig.Certificate oldC, AcmeConfig.Certificate newC) {
             this.registration = registration;
+            this.accountId = accountId;
             this.accountDbId = accountDbId;
             this.minimumValidityDays = minimumValidityDays;
             this.getAuthorization = getAuthorization;
@@ -456,34 +458,7 @@ public class AcmeManager {
             logger.info("Domains to authorize: {}", newC.hostnames);
             return chain(newC.hostnames
                     .stream()
-                    .map((domainName) -> (Supplier<Future<Void>>) () -> {
-                        logger.info("Authorizing domain {}", domainName);
-                    /*
-                } catch (AcmeUnauthorizedException e) {
-                    if (registration.getAgreement().equals(AGREEMENT_URI)) {
-                        logger.info("Agreeing to " + AGREEMENT_URI);
-                        registration.modify().setAgreement(new URI(AGREEMENT_URI)).commit();
-                        auth = registration.authorizeDomain(domainName);
-                    } else {
-                        throw new RuntimeException("You need to agree to the Subscriber Agreement at: " + registration.getAgreement(), e);
-                    }
-                }
-                */
-                        return getAuthorization.apply(domainName).compose(auth ->
-                                executeBlocking((Future<Status> fut) -> fut.complete(auth.getStatus())).compose(status -> {
-                                    logger.info("Domain {} authorization status: {}", domainName, status);
-                                    if (status == Status.VALID)
-                                        return succeededFuture(); // TODO what statuses really?
-                                    logger.info("Challenge combinations supported: " + auth.getCombinations());
-                                    Collection<Challenge> combination = auth.findCombination(SUPPORTED_CHALLENGES);
-                                    logger.info("Challenges to complete: " + combination);
-                                    return chain(combination.stream().map(challenge -> (Supplier<Future<Void>>) () ->
-                                            executeChallenge(domainName, challenge))).map(v -> {
-                                        logger.info("Domain {} successfully associated with account", domainName);
-                                        return null;
-                                    });
-                                })).<Void>mapEmpty();
-                    }))
+                    .map((domainName) -> (Supplier<Future<Void>>) () -> new ChallengeManager(accountId, certificateId, domainName, getAuthorization).updateOthers()))
                     .compose(v -> {
                         logger.info("All domains successfully authorized by account");
                         return createCertificate(registration, accountDbId, certificateId, keyPairFile, certificateFile, newC.hostnames, newC.organization).map(w -> {
@@ -557,10 +532,23 @@ public class AcmeManager {
             }));
         }
 
+    }
+
+    class ChallengeManager {
+        final String domainName;
+        final Function<String, Future<Authorization>> getAuthorization;
+        final ContextLogger logger;
+
         private final String[] SUPPORTED_CHALLENGES = {
                 TlsSni01Challenge.TYPE,
                 TlsSni02Challenge.TYPE
         };
+
+        public ChallengeManager(String accountId, String certificateId, String domainName, Function<String, Future<Authorization>> getAuthorization) {
+            this.domainName = domainName;
+            this.getAuthorization = getAuthorization;
+            logger = new ContextLogger(ChallengeManager.class, accountId, certificateId, domainName);
+        }
 
         private Future<Void> executeChallenge(String domainName, Challenge challenge) {
             return executeBlocking((Future<String> fut) -> {
@@ -623,6 +611,35 @@ public class AcmeManager {
                     return failedFuture(new RuntimeException("Challenge " + challenge.getType() + " for " + domainName + " failed with status " + challenge.getStatus()));
                 });
             });
+        }
+
+        public Future<Void> updateOthers() {
+            logger.info("Authorizing domain");
+                    /*
+                } catch (AcmeUnauthorizedException e) {
+                    if (registration.getAgreement().equals(AGREEMENT_URI)) {
+                        logger.info("Agreeing to " + AGREEMENT_URI);
+                        registration.modify().setAgreement(new URI(AGREEMENT_URI)).commit();
+                        auth = registration.authorizeDomain(domainName);
+                    } else {
+                        throw new RuntimeException("You need to agree to the Subscriber Agreement at: " + registration.getAgreement(), e);
+                    }
+                }
+                */
+            return getAuthorization.apply(domainName).compose(auth ->
+                    executeBlocking((Future<Status> fut) -> fut.complete(auth.getStatus())).compose(status -> {
+                        logger.info("Authorization status: {}", status);
+                        if (status == Status.VALID)
+                            return succeededFuture(); // TODO what statuses really?
+                        logger.info("Challenge combinations supported: " + auth.getCombinations());
+                        Collection<Challenge> combination = auth.findCombination(SUPPORTED_CHALLENGES);
+                        logger.info("Challenges to complete: " + combination);
+                        return chain(combination.stream().map(challenge -> (Supplier<Future<Void>>) () ->
+                                executeChallenge(domainName, challenge))).map(v -> {
+                            logger.info("Successfully associated with account");
+                            return null;
+                        });
+                    })).mapEmpty();
         }
     }
 
