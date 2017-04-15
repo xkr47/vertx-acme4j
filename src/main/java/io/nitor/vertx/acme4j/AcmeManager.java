@@ -185,7 +185,6 @@ public class AcmeManager {
                     } else {
                         logger.warn("Renewal check failed", ar.cause());
                     }
-                    schedule();
                 });
             });
             logger.info("Scheduled next renewal check at " + next);
