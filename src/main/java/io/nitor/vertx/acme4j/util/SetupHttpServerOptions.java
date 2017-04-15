@@ -38,7 +38,7 @@ public class SetupHttpServerOptions {
 
     static final Logger logger = getLogger(SetupHttpServerOptions.class);
 
-    public static HttpServerOptions createHttpServerOptions(Vertx vertx, DynamicCertOptions dynamicCertOptions) {
+    public static HttpServerOptions createHttpServerOptions(DynamicCertOptions dynamicCertOptions) {
         HttpServerOptions httpOptions = new HttpServerOptions()
                 // basic TCP/HTTP options
                 .setReuseAddress(true)

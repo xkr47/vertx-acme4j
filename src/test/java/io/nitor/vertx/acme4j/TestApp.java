@@ -69,7 +69,7 @@ public class TestApp extends AbstractVerticle
 
         // server side certificates
         DynamicCertOptions dynamicCertOptions = new DynamicCertOptions();
-        HttpServerOptions httpServerOptions = SetupHttpServerOptions.createHttpServerOptions(vertx, dynamicCertOptions);
+        HttpServerOptions httpServerOptions = SetupHttpServerOptions.createHttpServerOptions(dynamicCertOptions);
 
         vertx.createHttpServer(httpServerOptions)
                 .requestHandler(this::handle)
