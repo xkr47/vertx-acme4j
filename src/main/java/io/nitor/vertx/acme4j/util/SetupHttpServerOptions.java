@@ -39,6 +39,10 @@ public class SetupHttpServerOptions {
     static final Logger logger = getLogger(SetupHttpServerOptions.class);
 
     public static HttpServerOptions createHttpServerOptions(DynamicCertOptions dynamicCertOptions) {
+        return createHttpServerOptions(dynamicCertOptions, false);
+    }
+
+    public static HttpServerOptions createHttpServerOptions(DynamicCertOptions dynamicCertOptions, boolean jettyAgentAlreadyLoaded) {
         HttpServerOptions httpOptions = new HttpServerOptions()
                 // basic TCP/HTTP options
                 .setReuseAddress(true)
@@ -59,7 +63,7 @@ public class SetupHttpServerOptions {
                     .forEach(httpOptions::addEnabledCipherSuite);
         } else {
             httpOptions
-                    .setUseAlpn(DynamicAgent.enableJettyAlpn())
+                    .setUseAlpn(jettyAgentAlreadyLoaded || DynamicAgent.enableJettyAlpn())
                     .setJdkSslEngineOptions(new JdkSSLEngineOptions());
             cipherSuites.forEach(httpOptions::addEnabledCipherSuite);
         }
