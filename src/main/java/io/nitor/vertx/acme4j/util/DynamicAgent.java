@@ -22,6 +22,7 @@ import static java.nio.file.Files.createTempFile;
 import static java.nio.file.Files.newOutputStream;
 import static java.util.jar.Attributes.Name.MANIFEST_VERSION;
 
+import java.io.InputStream;
 import java.lang.instrument.Instrumentation;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -32,6 +33,7 @@ import java.util.Optional;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
 import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
 
 import org.mortbay.jetty.alpn.agent.Premain;
 
@@ -69,6 +71,18 @@ public class DynamicAgent {
             manifest.getMainAttributes().put(MANIFEST_VERSION, "1.0");
             manifest.getMainAttributes().putValue("Agent-Class", DynamicAgent.class.getName());
             JarOutputStream out = new JarOutputStream(newOutputStream(agentPath), manifest);
+/*
+            final String file = DynamicAgent.class.getName().replace('.','/') + ".class";
+            final ZipEntry e = new ZipEntry(file);
+            out.putNextEntry(e);
+            final InputStream classStream = DynamicAgent.class.getClassLoader().getResourceAsStream(file);
+            byte[] buf = new byte[4096];
+            int i;
+            while (-1 != (i = classStream.read(buf))) {
+                out.write(buf, 0, i);
+            }
+            out.closeEntry();
+*/
             out.close();
 
             URL[] urls = new URL[] {
