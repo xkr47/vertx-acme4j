@@ -2,11 +2,11 @@
   <configuration default="false" name="TestApp" type="Application" factoryName="Application" singleton="true" nameIsGenerated="true">
     <extension name="coverage" enabled="false" merge="false" sample_coverage="true" runner="idea">
       <pattern>
-        <option name="PATTERN" value="io.nitor.vertx.acme4j.*" />
+        <option name="PATTERN" value="space.xkr47.vertx.acme4j.*" />
         <option name="ENABLED" value="true" />
       </pattern>
     </extension>
-    <option name="MAIN_CLASS_NAME" value="io.nitor.vertx.acme4j.TestApp" />
+    <option name="MAIN_CLASS_NAME" value="space.xkr47.vertx.acme4j.TestApp" />
     <option name="VM_PARAMETERS" value="" />
     <option name="PROGRAM_PARAMETERS" value="" />
     <option name="WORKING_DIRECTORY" value="file://$PROJECT_DIR$" />

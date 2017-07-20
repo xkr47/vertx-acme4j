@@ -13,19 +13,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.nitor.vertx.acme4j;
+package space.xkr47.vertx.acme4j;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import io.nitor.vertx.acme4j.AcmeConfig.Account;
-import io.nitor.vertx.acme4j.async.AsyncKeyPairUtils;
-import io.nitor.vertx.acme4j.util.ContextLogger;
-import io.nitor.vertx.acme4j.util.DynamicCertManager;
-import io.nitor.vertx.acme4j.util.DynamicCertManager.CertCombo;
-import io.nitor.vertx.acme4j.util.MultiException;
-import io.nitor.vertx.acme4j.util.PemLoader;
+import space.xkr47.vertx.acme4j.AcmeConfig.Account;
+import space.xkr47.vertx.acme4j.async.AsyncKeyPairUtils;
+import space.xkr47.vertx.acme4j.util.ContextLogger;
+import space.xkr47.vertx.acme4j.util.DynamicCertManager;
+import space.xkr47.vertx.acme4j.util.DynamicCertManager.CertCombo;
+import space.xkr47.vertx.acme4j.util.MultiException;
+import space.xkr47.vertx.acme4j.util.PemLoader;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;

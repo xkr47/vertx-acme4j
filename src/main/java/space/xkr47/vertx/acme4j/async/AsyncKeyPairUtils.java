@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.nitor.vertx.acme4j.async;
+package space.xkr47.vertx.acme4j.async;
 
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;

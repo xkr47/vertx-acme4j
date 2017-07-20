@@ -13,11 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.nitor.vertx.acme4j;
+package space.xkr47.vertx.acme4j;
 
-import io.nitor.vertx.acme4j.util.DynamicCertManager;
-import io.nitor.vertx.acme4j.util.DynamicCertOptions;
-import io.nitor.vertx.acme4j.util.SetupHttpServerOptions;
+import space.xkr47.vertx.acme4j.util.DynamicCertManager;
+import space.xkr47.vertx.acme4j.util.DynamicCertOptions;
+import space.xkr47.vertx.acme4j.util.SetupHttpServerOptions;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Launcher;
 import io.vertx.core.http.HttpServerOptions;

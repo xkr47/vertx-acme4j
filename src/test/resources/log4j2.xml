@@ -6,7 +6,7 @@
         </Console>
     </Appenders>
     <Loggers>
-        <AsyncLogger name="io.nitor" level="trace"/>
+        <AsyncLogger name="xkr47.space" level="trace"/>
         <AsyncLogger name="org.shredzone.acme4j" level="trace"/>
         <AsyncRoot level="trace">
             <AppenderRef ref="CONSOLE"/>

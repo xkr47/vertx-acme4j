@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.nitor.vertx.acme4j.util;
+package space.xkr47.vertx.acme4j.util;
 
 import static java.lang.System.err;
 import static java.lang.System.getProperty;
@@ -22,7 +22,6 @@ import static java.nio.file.Files.createTempFile;
 import static java.nio.file.Files.newOutputStream;
 import static java.util.jar.Attributes.Name.MANIFEST_VERSION;
 
-import java.io.InputStream;
 import java.lang.instrument.Instrumentation;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -33,7 +32,6 @@ import java.util.Optional;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
 import java.util.stream.Stream;
-import java.util.zip.ZipEntry;
 
 import org.mortbay.jetty.alpn.agent.Premain;
 
