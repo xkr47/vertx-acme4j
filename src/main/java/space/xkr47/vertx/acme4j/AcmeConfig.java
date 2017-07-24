@@ -18,6 +18,7 @@ package space.xkr47.vertx.acme4j;
 import space.xkr47.vertx.acme4j.util.Struct;
 
 import java.time.LocalTime;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -100,16 +101,31 @@ public class AcmeConfig extends Struct {
             if (defaultCert != that.defaultCert) return false;
             if (organization != null ? !organization.equals(that.organization) : that.organization != null)
                 return false;
-            return hostnames != null ? hostnames.equals(that.hostnames) : that.hostnames == null;
+            return hostnames != null ? eq(hostnames, that.hostnames) : that.hostnames == null;
         }
-
         @Override
         public int hashCode() {
             int result = (enabled ? 1 : 0);
             result = 31 * result + (defaultCert ? 1 : 0);
             result = 31 * result + (organization != null ? organization.hashCode() : 0);
-            result = 31 * result + (hostnames != null ? hostnames.hashCode() : 0);
+            result = 31 * result + (hostnames != null ? hc(hostnames) : 0);
             return result;
+        }
+
+
+        /**
+         * Hostnames lists considered equal if first elements are the same and the lists treated as a set are equal
+         */
+        private boolean eq(List<String> a, List<String> b) {
+            if (a.isEmpty()) return b.isEmpty();
+            if (b.isEmpty()) return false;
+            if (!a.get(0).equals(b.get(0))) return false;
+            return new HashSet<>(a).equals(new HashSet<>(b));
+        }
+
+        private int hc(List<String> a) {
+            if (a.isEmpty()) return a.hashCode();
+            return a.get(0).hashCode() ^ new HashSet<>(a).hashCode();
         }
 
         @Override
