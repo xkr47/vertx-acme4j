@@ -73,6 +73,11 @@ import static java.util.Collections.emptyMap;
 import static java.util.concurrent.TimeUnit.DAYS;
 import static java.util.stream.Collectors.toList;
 
+/**
+ * The general idea here is to update everything in two passes. First path "updateCached" just loads everything that
+ * already exists and is still usable in a quick fashion - run in parallel. Second pass "updateOthers" creates & updates
+ * anything that is not in great shape.
+ */
 public class AcmeManager {
 
     static final String ACCOUNT_KEY_PAIR_FILE = "account-keypair.pem";
@@ -210,8 +215,12 @@ public class AcmeManager {
             logger = new ContextLogger(AccountManager.class, accountId);
         }
 
+        boolean empty(Account a) {
+            return a == null || !a.enabled;
+        }
+
         public Future<Void> updateCached() {
-            if (newAOrig == null || !newAccountDbId.equals(oldAccountDbId)) {
+            if (empty(newAOrig) || !newAccountDbId.equals(oldAccountDbId)) {
                 // deregister all certificates for old account; account destruction should be handled in some other way
                 return updateCached2(oldAccountDbId, oldAOrig, null)
                         // register all certificates for new account
@@ -223,8 +232,8 @@ public class AcmeManager {
         }
 
         private Future<Void> updateCached2(String accountDbId, Account oldA, Account newA) {
-            Map<String, AcmeConfig.Certificate> oldCs = oldA == null ? new HashMap<>() : oldA.certificates;
-            Map<String, AcmeConfig.Certificate> newCs = newA == null ? new HashMap<>() : newA.certificates;
+            Map<String, AcmeConfig.Certificate> oldCs = empty(oldA) ? new HashMap<>() : oldA.certificates;
+            Map<String, AcmeConfig.Certificate> newCs = empty(newA) ? new HashMap<>() : newA.certificates;
             Stream<Future<Void>> futures = mapDiff(oldCs, newCs)
                     .stream()
                     .map((certificate) -> {
@@ -235,7 +244,7 @@ public class AcmeManager {
         }
 
         public Future<Void> updateOthers() {
-            if (newAOrig == null || !newAccountDbId.equals(oldAccountDbId)) {
+            if (empty(newAOrig) || !newAccountDbId.equals(oldAccountDbId)) {
                 /*// deregister all certificates for old account; account destruction should be handled in some other way
                 updateOthers2(oldAccountDbId, oldAOrig, null, ar -> {
                     */
@@ -251,6 +260,9 @@ public class AcmeManager {
         }
 
         public Future<Void> updateOthers2(Account oldA) {
+            if (empty(newAOrig)) {
+                return succeededFuture();
+            }
             return getOrCreateAccountKeyPair(newAccountDbId).compose(accountKeyPair -> {
                 Session session;
                 try {
@@ -261,8 +273,8 @@ public class AcmeManager {
                 logger.info("Session set up");
                 return getOrCreateRegistration(newAccountDbId, newAOrig, session).compose(registration -> {
                     this.registration = registration;
-                    Map<String, AcmeConfig.Certificate> oldCs = oldA == null ? new HashMap<>() : oldA.certificates;
-                    Map<String, AcmeConfig.Certificate> newCs = newAOrig == null ? new HashMap<>() : newAOrig.certificates;
+                    Map<String, AcmeConfig.Certificate> oldCs = empty(oldA) ? new HashMap<>() : oldA.certificates;
+                    Map<String, AcmeConfig.Certificate> newCs = newAOrig.certificates;
                     Stream<Future<Void>> futures = mapDiff(oldCs, newCs)
                             .stream()
                             .map((certificate) -> {
@@ -440,8 +452,12 @@ public class AcmeManager {
             logger = new ContextLogger(AccountManager.class, accountId, certificateId);
         }
 
+        boolean empty(AcmeConfig.Certificate cert) {
+            return cert == null || !cert.enabled;
+        }
+
         public Future<Void> updateCached() {
-            if (newC == null) {
+            if (empty(newC)) {
                 // deregister certificate; certificate destruction should be handled in some other way
                 dynamicCertManager.remove(fullCertificateId);
                 return succeededFuture();
@@ -482,7 +498,7 @@ public class AcmeManager {
         }
 
         public Future<Void> updateOthers() {
-            if (newC == null) {
+            if (empty(newC)) {
                 return succeededFuture();
             }
             // oldC is null on startup so we are unable to compare.. need to make it non-null and force a check!
