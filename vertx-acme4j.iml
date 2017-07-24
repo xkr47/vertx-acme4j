@@ -25,7 +25,6 @@
     <orderEntry type="library" name="Maven: io.netty:netty-resolver:4.1.9.Final" level="project" />
     <orderEntry type="library" name="Maven: io.netty:netty-resolver-dns:4.1.9.Final" level="project" />
     <orderEntry type="library" name="Maven: io.netty:netty-codec-dns:4.1.9.Final" level="project" />
-    <orderEntry type="library" name="Maven: com.fasterxml.jackson.core:jackson-core:2.7.4" level="project" />
     <orderEntry type="library" name="Maven: com.nitorcreations:core-utils:1.4" level="project" />
     <orderEntry type="library" name="Maven: org.mortbay.jetty.alpn:jetty-alpn-agent:2.0.6" level="project" />
     <orderEntry type="library" scope="TEST" name="Maven: org.junit.jupiter:junit-jupiter-engine:5.0.0-M4" level="project" />
@@ -55,5 +54,6 @@
     <orderEntry type="library" name="Maven: com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.8.8" level="project" />
     <orderEntry type="library" name="Maven: com.fasterxml.jackson.core:jackson-annotations:2.8.0" level="project" />
     <orderEntry type="library" name="Maven: com.fasterxml.jackson.core:jackson-databind:2.8.8" level="project" />
+    <orderEntry type="library" name="Maven: com.fasterxml.jackson.core:jackson-core:2.8.8" level="project" />
   </component>
 </module>
