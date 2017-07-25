@@ -48,15 +48,19 @@ Allows you to quickly configure the domains, integrate it into your vert.x / ver
 }
 ```
 
-# tls-sni-01 and tls-sni-02
+# What is tls-sni-01 and tls-sni-02
 
-These challenges work so that a temporary certificate is made for a specific dummy domain. Using TLS SNI, the ACME provider then makes a request to our server on port 443, with the SNI hostname set to the dummy domain. The challenge is then completed when our server responds with the temporary certificate.
+ACME ensures that you are indeed in control of the domains you wish to have certificates for by asking you to prove it using one of the available challenges. Various protocols are available to do this. The tls-sni-* ones do it through the same port that the HTTPS/TLS traffic normally occurs for encrypted traffic. This means you don't need any additional firewall/etc configuration. Other challenges use for example port 80 or DNS records for proof. 
+
+In detail, the tls-sni-* challenges work so that a temporary certificate is made for a specific dummy domain. Using TLS SNI, the ACME provider then makes a request to our server on port 443, with the SNI hostname set to the dummy domain. The challenge is then completed when our server responds with the temporary certificate.
 
 Thanks to how SNI works we can still serve our regular domains (assuming you are using the certificates to serve HTTPS traffic) at the same time on the same port. Thanks to the dynamically reconfigurable keystore we can do it in vert.x without interruption to the service of the regular domains.
 
-# Under construction
+# Being test-driven on my personal projects
 
-This code is by no means ready. Don't expect it to work yet. Many scenarios already verified to work.
+The code is nearing a first release. It's in production use for my personal projects, testing the use of multiple certificates and multiple hostnames per certificate. Creating the first batch of 3 certificates with 8 hostnames took 5 minutes, mostly because of slow generation of new key pairs. (Installing a tool called "haveged" can speed up this and other similar processes like generating ssh keys.)
+
+Documentation is being updated to show how to deploy it in your existing server.
 
 # Goals and guidelines
 
