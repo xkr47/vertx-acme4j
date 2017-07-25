@@ -1,14 +1,17 @@
 # vertx-acme4j
-[vert.x](https://github.com/eclipse/vert.x/) adaptation of [acme4j](https://github.com/shred/acme4j) (Let's Encrypt)
+[vert.x](https://github.com/eclipse/vert.x/) integration for [acme4j](https://github.com/shred/acme4j) (Let's Encrypt) with fully automated certificate management/provisioning (account registration, certificate creation, installation & renewal).
 
-Provides a management layer so that you just have to configure the domains you want (and contact email) and the rest is automated (account & certificate creation, installation & renewal).
+Allows you to quickly configure the domains, integrate it into your vert.x / vertx-web application and manage all the HTTPS/TLS/SSL related stuff for you.
 
 # Pros (?)
-* Supports only tls-sni-01 and tls-sni-02 challenges, which means all challenges happen through the same port 443 as the server itself
+* Supports only tls-sni-01 and tls-sni-02 challenges, which means all challenges happen through the same port 443 as the server itself; no need to keep port 80 open.
 * Supports multiple ACME (Let's Encrypt or other, as supported by [acme4j](https://github.com/shred/acme4j)) accounts, multiple certificates per account and/or multiple hostnames per certificate
-* Enables TLS SNI support in vert.x through custom, dynamically reconfigurable keystore (no listen socket downtime)
+* Enables TLS SNI support in vert.x through custom, dynamically reconfigurable keystore
   * you can thus use it for hosting/reverse-proxying multiple services behind a single IP and port while still serving different certificates, selected using SNI hostname.
   * you can implement a server that does not have a default certificate at all -> TLS handshake fails if hostname is not listed in any of the installed certificates -> pure IP scanning reveals nothing (assuming reverse lookup of the server IP does not reveal a supported domain)
+  * certificate updates occur without service downtime
+* renewals and reattempts of failed renewals occur nightly att configured time
+  * configurable how many days in advance new certs are retrieved
 * Configurable through POJOs or JSON files.
 
 # Cons
