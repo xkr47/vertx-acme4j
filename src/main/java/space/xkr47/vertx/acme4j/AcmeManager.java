@@ -237,7 +237,7 @@ public class AcmeManager {
             Stream<Future<Void>> futures = mapDiff(oldCs, newCs)
                     .stream()
                     .map((certificate) -> {
-                        final CertificateManager cm = new CertificateManager(null, accountId, accountDbId, newA.minimumValidityDays, null, certificate.key, certificate.oldValue, certificate.newValue);
+                        final CertificateManager cm = new CertificateManager(null, accountId, accountDbId, newA == null ? 1 : newA.minimumValidityDays, null, certificate.key, certificate.oldValue, certificate.newValue);
                         return cm.updateCached().recover(describeFailure("For certificate " + certificate.key));
                     });
             return join(futures);
