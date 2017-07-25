@@ -64,12 +64,13 @@ Documentation is being updated to show how to deploy it in your existing server.
 
 # Goals and guidelines
 
-* Keep at most one ACME activity going at once, i.e. never attempt to create accounts or certificates or challenges at the same time.
+* [x] Keep at most one ACME activity going at once, i.e. never attempt to create accounts or certificates or challenges at the same time.
   * It's easier to deal with problems with a serial history of events
   * If you're bringing up a new set of things, they are by definition not in production yet, so time is not that much of an essence
-* Bring already existing certificates up as soon as possible regardless of the accessibility of the involved ACME servers
+* [x] Bring already existing certificates up as soon as possible regardless of the accessibility of the involved ACME servers
   * At least you get the most important e.g. existing services up and running quickly & regardless of outbound network connectivity
-  * Even if the certificates would have expired; better have some service than no service
-    * This could perhaps be configurable
-* Locally cache data necessary to achieve the above goals
-* Database (storing certs and metadata) implementation provided by interface so you can choose between single-machine or clustered implementations or write your own S3/whatnot sync.
+  * [ ] Even if the certificates would have expired; better have some service than no service
+    * [ ] This could perhaps be configurable
+  * [x] This is done in parallel
+* [x] Locally cache data necessary to achieve the above goals
+* [ ] Database (storing certs and metadata) implementation provided by interface so you can choose between single-machine or clustered implementations or write your own S3/whatnot sync.
