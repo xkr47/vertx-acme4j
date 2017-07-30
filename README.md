@@ -13,6 +13,7 @@ Allows you to quickly configure the domains, integrate it into your vert.x / ver
 * renewals and reattempts of failed renewals occur nightly att configured time
   * configurable how many days in advance new certs are retrieved
 * Configurable through POJOs or JSON files.
+* While not directly related, works with HTTP/2 given that you have netty-compatible ALPN support enabled through e.g. jetty-alpn, openssl, boringssl etc.
 
 # Cons
 * Requires TLS SNI from clients if you a) don't want to have a default certificate or b) clients need to access hostnames of other certificates than the **default certificate**. So if you can put all hostnames that need to be accessible by TLS-SNI-handicapped clients in the default certificate, TLS SNI is NOT required of the clients. Luckily TLS SNI seems pretty well supported by clients these days:
