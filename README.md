@@ -20,7 +20,9 @@ Allows you to quickly configure the domains, integrate it into your vert.x / ver
   * browsers & cURL support it
   * most trouble would probably be related to accessing e.g. REST endpoints over HTTPS from applications e.g. whether they support TLS SNI
 
-# Sample config file
+# Sample config
+
+As JSON file:
 
 ```json
 {
@@ -47,6 +49,40 @@ Allows you to quickly configure the domains, integrate it into your vert.x / ver
         }
     }
 }
+```
+
+or same programmatically:
+
+```java
+import space.xkr47.vertx.acme4j.AcmeConfig;
+import space.xkr47.vertx.acme4j.AcmeConfig.Account;
+import space.xkr47.vertx.acme4j.AcmeConfig.Certificate;
+
+import java.time.LocalTime;
+import java.util.Arrays;
+import java.util.HashMap;
+
+        AcmeConfig config = new AcmeConfig();
+        config.renewalCheckTime = LocalTime.of(4,27,11);
+        config.accounts = new HashMap<>();
+        {
+            Account testaccount = new Account();
+            config.accounts.put("testaccount", testaccount);
+            testaccount.enabled = true;
+            testaccount.acceptedAgreementUrl = "https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf";
+            testaccount.contactURIs = Arrays.asList("mailto:foo@example.com");
+            testaccount.minimumValidityDays = 5;
+            testaccount.providerUrl = "acme://letsencrypt.org/staging"; // remove 'staging' for production CA 
+            testaccount.certificates = new HashMap<>();
+            {
+                Certificate testcert = new Certificate();
+                testaccount.certificates.put("testcert", testcert);
+                testcert.enabled = true;
+                testcert.defaultCert = true;
+                testcert.organization = "My test organization";
+                testcert.hostnames = Arrays.asList("non.existing.blahblah");
+            }
+        }
 ```
 
 # What is tls-sni-01 and tls-sni-02
