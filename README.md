@@ -3,6 +3,10 @@
 
 Allows you to quickly configure the domains, integrate it into your vert.x / vertx-web application and manage all the HTTPS/TLS/SSL related stuff for you.
 
+# Getting started
+
+Instructions for [getting started](GETTING_STARTED.md) and [API docs](API.md) on separate pages.
+
 # Pros (?)
 * Supports only tls-sni-01 and tls-sni-02 challenges, which means all challenges happen through the same port 443 as the server itself; no need to keep port 80 open.
 * Supports multiple ACME (Let's Encrypt or other, as supported by [acme4j](https://github.com/shred/acme4j)) accounts, multiple certificates per account and/or multiple hostnames per certificate
