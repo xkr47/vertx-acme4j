@@ -25,6 +25,10 @@ import java.util.List;
 import static io.vertx.core.logging.LoggerFactory.getLogger;
 import static java.util.Arrays.asList;
 
+/**
+ * NOTE: This file is not yet/currently part of public API. If you want to use it, better copy-paste the whole class to
+ * your project.
+ */
 public class SetupHttpServerOptions {
     // syntax is in JVM SSL format
     private static final List<String> cipherSuites = asList(
@@ -53,6 +57,7 @@ public class SetupHttpServerOptions {
                 .addEnabledSecureTransportProtocol("TLSv1.2")
                 .addEnabledSecureTransportProtocol("TLSv1.3");
 
+        // enable HTTP/2 support if we can..
         if (USE_OPENSSL) {
             // TODO this has not really been tested with SNI yet
             httpOptions
