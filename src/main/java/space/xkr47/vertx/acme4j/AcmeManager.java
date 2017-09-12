@@ -739,6 +739,13 @@ public class AcmeManager {
         return doUpdate(cur, conf.clone());
     }
 
+    /**
+     * Manually request a check for whether certificate renewal is needed. This is not normally needed. However if say
+     * your server is often down at the configured renewal check time, or you know there's a renewal coming and want to
+     * manually follow the renewal§ process then this method can be used.
+     *
+     * @return A future that can be monitored for completion of renewal check.
+     */
     public Future<Void> check() {
         changeState(State.OK, State.UPDATING);
         return doUpdate(cur, cur);
@@ -755,6 +762,9 @@ public class AcmeManager {
                         exists ? readConf(file, "active") : future((Future<AcmeConfig> fut) -> fut.complete(emptyConf())));
     }
 
+    /**
+     * @return a valid empty configuration with no accounts, certificates or hostnames configured.
+     */
     public AcmeConfig emptyConf() {
         AcmeConfig emptyConf = new AcmeConfig();
         emptyConf.accounts = emptyMap();
