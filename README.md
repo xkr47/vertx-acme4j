@@ -14,7 +14,7 @@ Instructions for [getting started](GETTING_STARTED.md) and [API docs](API.md) on
   * you can thus use it for hosting/reverse-proxying multiple services behind a single IP and port while still serving different certificates, selected using SNI hostname.
   * you can implement a server that does not have a default certificate at all -> TLS handshake fails if hostname is not listed in any of the installed certificates -> pure IP scanning reveals nothing (assuming reverse lookup of the server IP does not reveal a supported domain)
   * certificate updates occur without service downtime
-* renewals and reattempts of failed renewals occur nightly att configured time
+* renewals and reattempts of failed renewals occur nightly at configured time
   * configurable how many days in advance new certs are retrieved
 * Configurable through POJOs or JSON files.
 * While not directly related, works with HTTP/2 given that you have netty-compatible ALPN support enabled through e.g. jetty-alpn, openssl, boringssl etc.
