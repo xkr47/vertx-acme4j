@@ -952,7 +952,7 @@ public class AcmeManager {
                 });
     }
 
-    // for a stream of callable functions returning futures, execute each in order, waiting for the previous' Future to complete, and returning a future completing when all completes. Aborts on failure, returning failure without executing rest of futures
+    // for a stream of callable functions returning futures, execute each in order, waiting for the previous' Future to complete, and returning a future completing when all (if any) completes. Aborts on failure, returning failure without executing rest of callable functions
     static Future<Void> chain(Stream<Supplier<Future<Void>>> stream) {
         return stream.reduce((Supplier<Future<Void>> a, Supplier<Future<Void>> b) -> () -> a.get().compose(v -> b.get()))
                 .orElse(() -> succeededFuture())
