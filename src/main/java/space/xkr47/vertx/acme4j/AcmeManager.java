@@ -87,9 +87,6 @@ public class AcmeManager {
     static final String ACCEPTED_TERMS_LOCATION_FILE = "acceptedTermsLocation.txt";
     static final String ACTIVE_CONF_PATH = "active.json";
 
-    //static final String ACME_SERVER_URI = "acme://letsencrypt.org/staging";
-    // static final String AGREEMENT_URI = "https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf";
-
     private static Logger logger = getLogger(AcmeManager.class);
 
     final Vertx vertx;
