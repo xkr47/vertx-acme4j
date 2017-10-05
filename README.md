@@ -103,7 +103,11 @@ The code is nearing a first release. It's in production use for my personal proj
 
 Documentation is being updated to show how to deploy it in your existing server.
 
-# Goals and guidelines
+# Getting started
+
+Instructions for [getting started](GETTING_STARTED.md) and [API docs](API.md) on separate pages.
+
+# Project goals and guidelines
 
 * [x] Keep at most one ACME activity going at once, i.e. never attempt to create accounts or certificates or challenges at the same time.
   * It's easier to deal with problems with a serial history of events
