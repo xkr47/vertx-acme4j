@@ -1,4 +1,7 @@
 # vertx-acme4j
+
+IMPORTANT NOTICE: http://www.securityweek.com/lets-encrypt-disables-tls-sni-01-validation
+
 [vert.x](https://github.com/eclipse/vert.x/) integration for [acme4j](https://github.com/shred/acme4j) (Let's Encrypt) with fully automated certificate management/provisioning (account registration, certificate creation, installation & renewal).
 
 Allows you to quickly configure the domains, integrate it into your vert.x / vertx-web application and manage all the HTTPS/TLS/SSL related stuff for you.
